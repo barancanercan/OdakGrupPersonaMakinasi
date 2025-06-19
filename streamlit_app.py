@@ -14,6 +14,7 @@ from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 import tempfile
 from random import choice
+import random
 
 # Sayfa yapılandırması
 st.set_page_config(
@@ -220,16 +221,19 @@ if start_button and (uploaded_file is not None or simulator.agenda_items):
             try:
                 memory_text = "Henüz özetlenmiş bir bellek yok."
                 if simulator.memory:
-                    memory_text = "\n\n".join([f"{k[0]} - {k[1]}: {v}" for k, v in simulator.memory.items()])
-                memory_placeholder.text(memory_text)
-                
-                # MCP loglarını güncelle
+                    memory_text = "\n\n".join([
+                        f"**{k[0]}** - *{k[1]}*:\n{v}" for k, v in simulator.memory.items()
+                    ])
+                memory_placeholder.markdown(memory_text)
+                # MCP loglarını güncelle (tam metin ve daha okunaklı)
                 if hasattr(simulator, 'mcp_logs'):
-                    mcp_logs_text = "\n\n".join([f"{log['type']}: {log['prompt'][:100]}... -> {log['response'][:100]}..." for log in simulator.mcp_logs])
-                    mcp_logs_placeholder.text(mcp_logs_text)
+                    mcp_logs_text = "\n\n".join([
+                        f"**{log.get('type','')}**\n<details><summary>Prompt</summary><pre style='white-space:pre-wrap'>{log.get('prompt','')}</pre></details>\n<details><summary>Yanıt</summary><pre style='white-space:pre-wrap'>{log.get('response','')}</pre></details>"
+                        for log in simulator.mcp_logs
+                    ])
+                    mcp_logs_placeholder.markdown(mcp_logs_text, unsafe_allow_html=True)
                 else:
                     mcp_logs_placeholder.text("Henüz MCP logu yok.")
-                
                 # İstek istatistiklerini güncelle
                 stats = simulator.llm_client.get_request_stats()
                 stats_text = f"""
@@ -331,23 +335,39 @@ if start_button and (uploaded_file is not None or simulator.agenda_items):
             try:
                 st.session_state['stop_simulation'] = False
                 simulator.is_running = True
-                # Gündem maddelerini puanla
-                update_status(0, 1, "Başlatılıyor", "Sistem")
+                update_status(0, 3, "Başlatılıyor", "Sistem")
                 await simulator.score_agenda_items()
-                
-                # Simülasyonu başlat
+                # --- PUAN TABLOSU GÖSTER ---
+                if simulator.agenda_items and simulator.personas:
+                    for agenda_item in simulator.agenda_items:
+                        st.markdown(f"### Gündem: {agenda_item.title}")
+                        puanlar = []
+                        for persona in simulator.personas:
+                            score = None
+                            key = (persona.name, agenda_item.title)
+                            # Hafızada özet varsa, puan da vardır
+                            if hasattr(agenda_item, 'score'):
+                                # Her persona için ayrı ayrı puan tutmak için hafızadan çek
+                                # (score_agenda_items fonksiyonunda ayrı ayrı tutulmuyorsa, MCP loglarından çek)
+                                # MCP loglarında type: 'score' olanları bul
+                                for log in simulator.mcp_logs:
+                                    if log.get('type') == 'score' and persona.name in log.get('prompt', '') and agenda_item.title in log.get('prompt', ''):
+                                        try:
+                                            # Yanıttan ilk sayı
+                                            score = int(''.join(filter(str.isdigit, log.get('response', ''))))
+                                        except:
+                                            score = log.get('response', '').strip()
+                            if score is not None:
+                                puanlar.append(f"**{persona.name}**: {score}")
+                        if puanlar:
+                            st.info(" | ".join(puanlar))
+                # --- PUAN TABLOSU SONU ---
+                max_rounds = 3  # 3 tur boyunca tartışma
                 round_count = 0
-                max_rounds = 1  # Herkes bir kez konuşacak, sonra moderatör yönlendirecek
                 for agenda_item in simulator.agenda_items:
-                    if st.session_state['stop_simulation']:
-                        simulator.is_running = False
-                        update_status(0, 1, "Durduruldu", "-")
-                        st.warning("Simülasyon kullanıcı tarafından durduruldu.")
-                        return
-                    # Moderatör girişini ekle
+                    # Moderatör giriş cümlesi
                     update_status(round_count + 1, max_rounds, agenda_item.title, "Moderatör")
-                    first_persona = simulator.personas[0].name if simulator.personas else "katılımcı"
-                    moderator_intro = await simulator.moderator.start_discussion(agenda_item, first_persona)
+                    moderator_intro = f"Merhaba, bugün '{agenda_item.title}' konusunu konuşmak üzere toplandık. Herkesin görüşlerini duymak için heyecanlıyım. Şimdi sırayla söz hakkı vereceğim."
                     simulator.discussion_log.append({
                         'timestamp': datetime.now(),
                         'speaker': 'Moderatör',
@@ -356,31 +376,27 @@ if start_button and (uploaded_file is not None or simulator.agenda_items):
                     update_discussion()
                     update_memory_and_logs()
                     await asyncio.sleep(2)
-                    # Her persona bir kez konuşsun
-                    for i, agent in enumerate(simulator.agents):
+                    for round_idx in range(max_rounds):
                         if st.session_state['stop_simulation']:
                             simulator.is_running = False
-                            update_status(round_count + 1, max_rounds, agenda_item.title, agent.persona.name)
+                            update_status(round_count + 1, max_rounds, agenda_item.title, "-")
                             st.warning("Simülasyon kullanıcı tarafından durduruldu.")
                             return
-                        update_status(round_count + 1, max_rounds, agenda_item.title, agent.persona.name)
-                        context = simulator._build_context()
-                        response = await agent.generate_response(context, agenda_item)
-                        simulator.discussion_log.append({
-                            'timestamp': datetime.now(),
-                            'speaker': agent.persona.name,
-                            'message': response
-                        })
-                        update_discussion()
-                        update_memory_and_logs()
-                        await asyncio.sleep(3)
-                        # Moderatör geçişi
-                        if i < len(simulator.agents) - 1:
+                        # Her turda konuşma sırası random olsun, ama herkes bir kez konuşsun
+                        agent_indices = list(range(len(simulator.agents)))
+                        random.shuffle(agent_indices)
+                        for idx, i in enumerate(agent_indices):
+                            agent = simulator.agents[i]
+                            # Moderatör sıradaki kişiye söz veriyor
                             update_status(round_count + 1, max_rounds, agenda_item.title, "Moderatör")
-                            next_persona = simulator.agents[i + 1].persona.name
-                            moderator_transition = await simulator.moderator.give_turn(
-                                agent.persona.name, next_persona
-                            )
+                            next_persona = agent.persona.name
+                            gecisler = [
+                                f"Şimdi sözü {next_persona}'ya verelim.",
+                                f"{next_persona}, sen ne düşünüyorsun?",
+                                f"Sıradaki görüş için {next_persona} hazır mısın?",
+                                f"{next_persona}, senin de fikrini alalım."
+                            ]
+                            moderator_transition = random.choice(gecisler)
                             simulator.discussion_log.append({
                                 'timestamp': datetime.now(),
                                 'speaker': 'Moderatör',
@@ -389,14 +405,32 @@ if start_button and (uploaded_file is not None or simulator.agenda_items):
                             update_discussion()
                             update_memory_and_logs()
                             await asyncio.sleep(2)
-                    # Herkes konuştu, moderatör tartışmayı özetlesin veya minik bir yorum yapsın
+                            # Söz verilen persona konuşuyor
+                            if st.session_state['stop_simulation']:
+                                simulator.is_running = False
+                                update_status(round_count + 1, max_rounds, agenda_item.title, agent.persona.name)
+                                st.warning("Simülasyon kullanıcı tarafından durduruldu.")
+                                return
+                            update_status(round_count + 1, max_rounds, agenda_item.title, agent.persona.name)
+                            context = simulator._build_context()
+                            response = await agent.generate_response(context, agenda_item)
+                            simulator.discussion_log.append({
+                                'timestamp': datetime.now(),
+                                'speaker': agent.persona.name,
+                                'message': response
+                            })
+                            update_discussion()
+                            update_memory_and_logs()
+                            await asyncio.sleep(3)
+                        round_count += 1
+                    # Tur bitince moderatör yorum eklesin
                     yorumlar = [
                         "Gerçekten ilginç görüşler ortaya çıktı! Katılımcılarımıza teşekkürler.",
                         "Tartışma oldukça hareketli geçti, herkesin katkısı çok değerliydi.",
                         "Farklı bakış açılarıyla zenginleşen bir tartışma oldu.",
                         "Her birinizin yorumu tartışmaya ayrı bir renk kattı!"
                     ]
-                    moderator_comment = choice(yorumlar)
+                    moderator_comment = random.choice(yorumlar)
                     simulator.discussion_log.append({
                         'timestamp': datetime.now(),
                         'speaker': 'Moderatör',
@@ -406,7 +440,7 @@ if start_button and (uploaded_file is not None or simulator.agenda_items):
                     update_memory_and_logs()
                     await asyncio.sleep(2)
                 simulator.is_running = False
-                update_status(1, 1, "Tamamlandı", "-")
+                update_status(max_rounds, max_rounds, "Tamamlandı", "-")
                 st.success("Simülasyon tamamlandı.")
             except Exception as e:
                 simulator.is_running = False
@@ -414,9 +448,18 @@ if start_button and (uploaded_file is not None or simulator.agenda_items):
                 update_status(1, 1, "Hata", "-", error_msg)
                 error_placeholder.error(error_msg)
                 st.error("Simülasyon beklenmedik bir hata ile karşılaştı.")
-        
         # Simülasyonu başlat
         loop.run_until_complete(run_simulation())
+        # Simülasyonu durdur butonu burada, update_status fonksiyonuna erişebilir
+        if stop_button:
+            st.session_state['stop_simulation'] = True
+            simulator.is_running = False
+            try:
+                simulator.stop_simulation()
+                update_status(0, 1, "Durduruldu", "-")
+                st.warning("Simülasyon durduruldu.")
+            except Exception as e:
+                st.error(f"Simülasyon durdurma hatası: {str(e)}")
     except Exception as e:
         st.error(f"Simülasyon başlatma hatası: {str(e)}")
     finally:
@@ -425,17 +468,6 @@ if start_button and (uploaded_file is not None or simulator.agenda_items):
             loop.close()
         except:
             pass
-
-# Simülasyonu durdur
-if stop_button:
-    st.session_state['stop_simulation'] = True
-    simulator.is_running = False
-    try:
-        simulator.stop_simulation()
-        update_status(0, 1, "Durduruldu", "-")
-        st.warning("Simülasyon durduruldu.")
-    except Exception as e:
-        st.error(f"Simülasyon durdurma hatası: {str(e)}")
 
 # Analiz raporu
 if st.button("📊 Analiz Et") and simulator.discussion_log:

@@ -144,7 +144,7 @@ class LLMClient:
                         temperature=0.7,
                         top_p=0.8,
                         top_k=40,
-                        max_output_tokens=1024,
+                        max_output_tokens=3072,
                     )
                 )
                 
@@ -189,8 +189,9 @@ class LLMClient:
         }
 
 class MCPThinkingAgent:
-    def __init__(self, llm_client: LLMClient):
+    def __init__(self, llm_client: LLMClient, simulator=None):
         self.llm_client = llm_client
+        self.simulator = simulator
     
     async def score_agenda_item(self, persona: Persona, item: AgendaItem) -> float:
         """Score an agenda item based on persona's perspective"""
@@ -255,9 +256,11 @@ Sıfatlar: {persona.adjectives}
 5. Eğer taslak tutarlı ve uygunsa, taslağı olduğu gibi tekrar et.
 6. Eğer taslak tutarsızsa veya geliştirilmesi gerekiyorsa, personanın karakterine tam olarak uygun, mantıklı ve bağlamla uyumlu yeni bir yanıt oluştur. Yanıt, sadece personanın söyleyeceği sözler olmalıdır, başka bir açıklama veya ekleme yapma.
 """
-        
         response = await self.llm_client.call_llm(prompt)
-        mcp_logs.append({"type": "validate", "prompt": prompt, "response": response})
+        log_entry = {"type": "validate", "prompt": prompt, "response": response}
+        mcp_logs.append(log_entry)
+        if self.simulator is not None and hasattr(self.simulator, 'mcp_logs'):
+            self.simulator.mcp_logs.append(log_entry)
         validated_response = response.strip()
         return validated_response
 
@@ -288,7 +291,10 @@ Yorumlar: {agenda_item.comments}
 - Yanıtın sadece persona'nın aklında kalanlar olsun, başka açıklama ekleme.
 """
         response = await self.llm_client.call_llm(prompt)
-        mcp_logs.append({"type": "memory", "prompt": prompt, "response": response})
+        log_entry = {"type": "memory", "prompt": prompt, "response": response}
+        mcp_logs.append(log_entry)
+        if self.simulator is not None and hasattr(self.simulator, 'mcp_logs'):
+            self.simulator.mcp_logs.append(log_entry)
         return response.strip()
 
 class FocusGroupAgent(ChatAgent):
@@ -441,7 +447,7 @@ Raporunu akademik ve objektif bir dille yaz. Analizlerini somut örneklerle dest
 class FocusGroupSimulator:
     def __init__(self):
         self.llm_client = LLMClient()
-        self.mcp_agent = MCPThinkingAgent(self.llm_client)
+        self.mcp_agent = MCPThinkingAgent(self.llm_client, self)
         self.moderator = ModeratorAgent(self.llm_client)
         self.overseer = OverseerAgent(self.llm_client)
         
@@ -451,6 +457,7 @@ class FocusGroupSimulator:
         self.discussion_log = []
         self.is_running = False
         self.memory = {}
+        self.mcp_logs = []
         
         # Load personas
         self.load_personas()
