@@ -529,4 +529,6 @@ if st.button('📄 PDF Olarak İndir'):
     with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmpfile:
         pdf.output(tmpfile.name)
         with open(tmpfile.name, 'rb') as f:
-            st.download_button('PDF Dosyasını İndir', f, file_name='odak_grup_simulasyonu.pdf', mime='application/pdf') 
+            st.download_button('PDF Dosyasını İndir', f, file_name='odak_grup_simulasyonu.pdf', mime='application/pdf')
+
+st.write("Streamlit başlatıldı!") 
