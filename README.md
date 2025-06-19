@@ -16,10 +16,12 @@ Bu proje, **odak grup tartışmalarını** simüle eden, yapay zekâ destekli, m
 
 - **Çoklu Persona Desteği:** Her biri farklı geçmiş, bilgi, tarz ve profil fotoğrafına sahip katılımcılar.
 - **Gündem Yükleme:** CSV veya Excel dosyasından tartışma gündemleri yüklenebilir.
-- **Simülasyon Akışı:** Moderatör ve katılımcılar arasında gerçekçi, çok turlu tartışma.
+- **Simülasyon Akışı:** Moderatör ve katılımcılar arasında gerçekçi, çok turlu ve random sıralı tartışma. Moderatör her gündem başında giriş cümlesiyle başlar.
+- **Puanlama ve Bellek Görünümü:** Her persona, her gündem maddesine verdiği puanları ve özetleri ekranda görebilirsiniz.
+- **MCP Logları:** Tüm LLM (puanlama, özet, validasyon) loglarını detaylı ve açılır/kapanır şekilde inceleyebilirsiniz.
 - **Durdur & Devam Ettir:** Simülasyon istenildiği anda durdurulabilir.
 - **Canlı Tartışma Görüntüleme:** Modern, karanlık temalı, profil fotoğraflı ve zaman damgalı mesaj kutuları.
-- **Analiz Raporu:** Tartışma sonunda otomatik olarak detaylı analiz raporu oluşturulur.
+- **Analiz Raporu:** Tartışma sonunda otomatik olarak detaylı ve uzun analiz raporu oluşturulur.
 - **PDF İndir:** Tüm tartışma ve analiz, modern formatta PDF olarak indirilebilir.
 - **API Anahtarı Yönetimi:** (Gerekirse) LLM API anahtarı değişimi ve rate limit yönetimi.
 - **Kapsamlı Hata Yönetimi:** Kullanıcı dostu hata ve durum mesajları.
@@ -92,6 +94,8 @@ OdakGrupPersonaMakinasi/
 2. **Tarayıcıda açılan arayüzde:**
    - Gündem dosyasını yükle (CSV/Excel)
    - "Odak Grup Makinasını Başlat" butonuna tıkla
+   - Tartışma sırasında: Her persona ve gündem için puanları, özetleri ve tüm MCP loglarını detaylıca görebilirsin.
+   - Tartışma random sırayla ve moderatörün giriş cümlesiyle başlar.
    - Tartışmayı canlı takip et, durdurmak istersen "Durdur" butonunu kullan
    - Tartışma sonunda analiz raporunu ve PDF çıktısını indir
 
@@ -140,6 +144,8 @@ Profil fotoğrafı ise `personas_pp/elif.jpg` veya `personas_pp/elif.png` olarak
 - `python-dotenv`
 
 Ek olarak, profil fotoğrafları için `personas_pp/` klasöründe uygun görseller bulunmalıdır.
+
+> **Not:** LLM tabanlı analiz ve özetler için internet bağlantısı ve geçerli bir API anahtarı gereklidir. Analiz ve PDF çıktısı uzun ve tam metin olarak alınabilir.
 
 ---
 
