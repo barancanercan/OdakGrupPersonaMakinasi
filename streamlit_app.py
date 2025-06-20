@@ -134,6 +134,8 @@ st.markdown("""
 # Persona adını profile_pic yoluna eşleyecek bir yardımcı fonksiyon
 def get_persona_pic(persona_name):
     pp_dir = 'personas_pp'
+    if not os.path.exists(pp_dir):
+        return None
     safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', persona_name.lower().replace(' ', '_'))
     pic_path_jpg = f"{pp_dir}/{safe_name}.jpg"
     pic_path_png = f"{pp_dir}/{safe_name}.png"
@@ -498,28 +500,46 @@ def create_pdf(conversation, analysis, personas):
     bold_font_path = "DejaVuSans-Bold.ttf"
     if not os.path.exists(bold_font_path):
         bold_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-    pdf.add_font('DejaVu', '', font_path)
-    pdf.add_font('DejaVu', 'B', bold_font_path)
-    pdf.set_font('DejaVu', '', 16)
+    try:
+        pdf.add_font('DejaVu', '', font_path)
+        pdf.add_font('DejaVu', 'B', bold_font_path)
+        pdf.set_font('DejaVu', '', 16)
+    except Exception:
+        pdf.set_font('Arial', '', 16)
     pdf.cell(0, 10, 'Odak Grup Simülasyonu', new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
     pdf.ln(10)
-    pdf.set_font('DejaVu', '', 12)
+    try:
+        pdf.set_font('DejaVu', '', 12)
+    except Exception:
+        pdf.set_font('Arial', '', 12)
     pdf.cell(0, 10, 'Konuşma Geçmişi:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(5)
     for entry in conversation:
         timestamp = entry['timestamp'].strftime('%H:%M:%S')
         speaker = entry['speaker']
         message = entry['message']
-        pdf.set_font('DejaVu', 'B', 12)
+        try:
+            pdf.set_font('DejaVu', 'B', 12)
+        except Exception:
+            pdf.set_font('Arial', 'B', 12)
         pdf.cell(0, 8, f"{speaker} [{timestamp}]", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font('DejaVu', '', 12)
+        try:
+            pdf.set_font('DejaVu', '', 12)
+        except Exception:
+            pdf.set_font('Arial', '', 12)
         pdf.multi_cell(0, 8, message)
         pdf.ln(2)
     pdf.ln(5)
     if analysis:
-        pdf.set_font('DejaVu', 'B', 14)
+        try:
+            pdf.set_font('DejaVu', 'B', 14)
+        except Exception:
+            pdf.set_font('Arial', 'B', 14)
         pdf.cell(0, 10, 'Analiz:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font('DejaVu', '', 12)
+        try:
+            pdf.set_font('DejaVu', '', 12)
+        except Exception:
+            pdf.set_font('Arial', '', 12)
         pdf.multi_cell(0, 8, analysis)
     return pdf
 
