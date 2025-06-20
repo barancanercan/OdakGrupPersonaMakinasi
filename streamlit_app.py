@@ -1,3 +1,19 @@
+import os
+import re
+import json
+import asyncio
+import pandas as pd
+from datetime import datetime
+import time
+import base64
+import html
+from fpdf import FPDF
+from fpdf.enums import XPos, YPos
+import tempfile
+import random
+from typing import Dict, List, Optional
+import logging
+from pathlib import Path
 import streamlit as st
 import os
 import re
@@ -22,6 +38,12 @@ try:
 except ImportError:
     st.error("⚠️ Ana simülasyon modülleri bulunamadı. main.py dosyasının mevcut olduğundan emin olun.")
     st.stop()
+
+# Global simulation control variables
+SIMULATION_STATE = {
+    'running': False,
+    'stop_requested': False
+}
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -166,35 +188,6 @@ def load_css():
         margin: 1rem 0 !important;
     }
     
-    /* Progress indicators */
-    .progress-indicator {
-        background: rgba(30, 41, 59, 0.8) !important;
-        border-radius: 12px !important;
-        padding: 1rem !important;
-        margin: 1rem 0 !important;
-        border: 1px solid rgba(100, 116, 139, 0.2) !important;
-        text-align: center !important;
-    }
-    
-    .progress-step {
-        display: inline-block !important;
-        width: 12px !important;
-        height: 12px !important;
-        border-radius: 50% !important;
-        margin: 0 0.5rem !important;
-        background: #374151 !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .progress-step.active {
-        background: #6366f1 !important;
-        box-shadow: 0 0 20px rgba(99, 102, 241, 0.5) !important;
-    }
-    
-    .progress-step.completed {
-        background: #10b981 !important;
-    }
-    
     /* Chat styling */
     .chat-container {
         background: rgba(15, 23, 42, 0.95);
@@ -207,6 +200,20 @@ def load_css():
         box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
         width: 100%;
         box-sizing: border-box;
+    }
+    
+    .message-bubble {
+        background: rgba(30, 41, 59, 0.8);
+        border-radius: 15px;
+        padding: 1rem;
+        margin: 1rem 0;
+        border-left: 4px solid #6366f1;
+        color: #e2e8f0;
+    }
+    
+    .moderator-bubble {
+        border-left-color: #ec4899;
+        background: rgba(236, 72, 153, 0.1);
     }
     
     /* Streamlit-specific components */
@@ -284,6 +291,8 @@ def initialize_session_state():
         st.session_state.agenda_loaded = False
     if 'expert_analysis_result' not in st.session_state:
         st.session_state.expert_analysis_result = ""
+    if 'discussion_duration' not in st.session_state:
+        st.session_state.discussion_duration = 15
 
 # Helper functions
 def get_persona_pic(persona_name: str) -> Optional[str]:
@@ -330,19 +339,23 @@ def validate_agenda_file(df: pd.DataFrame) -> tuple[bool, str]:
     
     return True, "Dosya başarıyla doğrulandı"
 
+def check_api_keys():
+    """Check if API keys are available"""
+    return (hasattr(simulator, 'llm_client') and 
+            simulator.llm_client.api_key is not None and 
+            simulator.llm_client.api_key.strip() != '')
+
 def clean_html_and_format_text(text):
     """Clean HTML tags and format text properly"""
     if not text:
         return ""
     
     text = str(text)
+    # HTML etiketlerini temizle
     text = re.sub(r'<[^>]+>', '', text)
-    text = text.replace('&nbsp;', ' ')
-    text = text.replace('&lt;', '<')
-    text = text.replace('&gt;', '>')
-    text = text.replace('&amp;', '&')
-    text = text.replace('&quot;', '"')
-    text = text.replace('&#39;', "'")
+    # HTML entitilerini çöz
+    text = html.unescape(text)
+    # Fazla boşlukları temizle
     text = ' '.join(text.split())
     text = text.strip()
     
@@ -457,231 +470,193 @@ def display_simulation_tab():
     # Control buttons
     st.markdown("### 🎮 Simülasyon Kontrolü")
     
+    # Tartışma süresi seçimi
+    col_duration, col_spacer = st.columns([2, 2])
+    
+    with col_duration:
+        discussion_duration = st.slider(
+            "🕒 Tartışma Süresi (dakika)", 
+            min_value=5, 
+            max_value=60, 
+            value=15,
+            step=5,
+            help="Tartışmanın ne kadar süreceğini belirleyin (5-60 dakika arası)"
+        )
+        st.session_state['discussion_duration'] = discussion_duration
+        st.info(f"Seçilen süre: {discussion_duration} dakika (~{discussion_duration//5} tur tartışma)")
+    
     button_col1, button_col2, button_col3 = st.columns(3)
     
     with button_col1:
-        start_enabled = st.session_state.agenda_loaded and not st.session_state.simulation_running
+        start_enabled = st.session_state.agenda_loaded and not SIMULATION_STATE['running']
         if st.button("▶️ Simülasyonu Başlat", disabled=not start_enabled, key="start_btn"):
-            st.session_state.simulation_running = True
-            st.session_state.stop_simulation = False
-            run_simulation()
+            # API anahtarı kontrolü
+            if not check_api_keys():
+                st.error("❌ API anahtarları bulunamadı! Lütfen .env dosyasında GEMINI_API_KEY tanımlayın.")
+                return
+                
+            SIMULATION_STATE['running'] = True
+            SIMULATION_STATE['stop_requested'] = False
+            start_simulation()
     
     with button_col2:
-        if st.button("⏹️ Durdur", disabled=not st.session_state.simulation_running, key="stop_btn"):
+        if st.button("⏹️ Durdur", disabled=not SIMULATION_STATE['running'], key="stop_btn"):
             stop_simulation()
     
     with button_col3:
         if st.button("🔄 Sıfırla", key="reset_btn"):
             reset_simulation()
     
-    # Simulation display
-    display_simulation_content()
+    # Simulation status display
+    display_simulation_status()
+    
+    # Ana içeriğin sonunda konuşmalar bölümünü göster
+    display_conversation_section()
 
-def run_simulation():
-    """Odak grup simülasyonunu başlat"""
-    if not simulator.agenda_items:
-        st.error("Gündem maddesi bulunamadı!")
-        return
-    
-    # Placeholders for dynamic updates
-    status_placeholder = st.empty()
-    progress_placeholder = st.empty()
-    scores_placeholder = st.empty()
-    discussion_placeholder = st.empty()
-    
+def start_simulation():
+    """Start simulation synchronously"""
     try:
+        if not simulator.agenda_items:
+            st.error("❌ Gündem maddesi bulunamadı!")
+            return
+            
+        # Prepare and run simulation
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        async def simulation_runner():
-            # Status updates
-            status_placeholder.markdown('<div class="status-card">🚀 Simülasyon başlatılıyor...</div>', unsafe_allow_html=True)
-            
-            # Step 1: Agenda analysis
-            progress_placeholder.markdown("""
-            <div class="progress-indicator">
-                <div class="progress-step active"></div>
-                <span>📊 Gündem analizi yapılıyor...</span>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            await simulator.prepare_agenda_analysis()
-            
-            # Show scores
-            display_agenda_scores(scores_placeholder)
-            
-            # Step 2: Start discussion
-            progress_placeholder.markdown("""
-            <div class="progress-indicator">
-                <div class="progress-step completed"></div>
-                <div class="progress-step active"></div>
-                <span>💬 Tartışma başlatılıyor...</span>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            async def on_new_message():
-                """Callback for new messages"""
-                update_discussion_display(discussion_placeholder)
-                await asyncio.sleep(0.1)
-            
-            # Start simulation
-            st.session_state.simulation_running = True
-            await simulator.start_simulation(max_rounds=2, on_new_message=on_new_message)
-            st.session_state.simulation_running = False
-            
-            # Completed
-            progress_placeholder.markdown("""
-            <div class="progress-indicator">
-                <div class="progress-step completed"></div>
-                <div class="progress-step completed"></div>
-                <div class="progress-step completed"></div>
-                <span>✅ Simülasyon tamamlandı!</span>
-            </div>
-            """, unsafe_allow_html=True)
-            
-            status_placeholder.markdown('<div class="success-card">✅ Simülasyon başarıyla tamamlandı!</div>', unsafe_allow_html=True)
-            update_discussion_display(discussion_placeholder)
+        # Step 1: Prepare agenda analysis
+        status_placeholder = st.empty()
+        progress_placeholder = st.empty()
         
-        loop.run_until_complete(simulation_runner())
+        status_placeholder.markdown('<div class="info-card">📊 Gündem analizi başlatılıyor...</div>', unsafe_allow_html=True)
+        progress_placeholder.progress(0.1)
+        
+        try:
+            loop.run_until_complete(simulator.prepare_agenda_analysis())
+            status_placeholder.markdown('<div class="success-card">✅ Gündem analizi tamamlandı!</div>', unsafe_allow_html=True)
+            progress_placeholder.progress(0.3)
+            
+            # Show scores immediately
+            if simulator.agenda_items and any(item.persona_scores for item in simulator.agenda_items):
+                st.markdown("#### 📊 Gündem Puanları Hesaplandı")
+                display_agenda_scores()
+            
+        except Exception as e:
+            status_placeholder.markdown(f'<div class="error-card">❌ Gündem analizi hatası: {str(e)}</div>', unsafe_allow_html=True)
+            SIMULATION_STATE['running'] = False
+            return
+        
+        # Step 2: Start discussion
+        status_placeholder.markdown('<div class="info-card">💬 Tartışma başlatılıyor...</div>', unsafe_allow_html=True)
+        progress_placeholder.progress(0.5)
+        
+        # Discussion container
+        discussion_container = st.empty()
+        
+        try:
+            async def run_discussion():
+                discussion_duration_minutes = st.session_state.get('discussion_duration', 5)
+                start_time = time.time()
+                end_time = start_time + (discussion_duration_minutes * 60)  # Convert to seconds
+                
+                message_count = 0
+                
+                status_placeholder.markdown(f'<div class="info-card">💬 {discussion_duration_minutes} dakikalık tartışma başlatılıyor...</div>', unsafe_allow_html=True)
+                
+                async def on_new_message():
+                    nonlocal message_count
+                    message_count += 1
+                    
+                    # Calculate time-based progress
+                    current_time = time.time()
+                    elapsed_time = current_time - start_time
+                    progress = min(elapsed_time / (discussion_duration_minutes * 60), 1.0)
+                    progress_percentage = 0.5 + (progress * 0.4)
+                    progress_placeholder.progress(progress_percentage)
+                    
+                    # Update status with time remaining
+                    time_remaining = max(0, (end_time - current_time) / 60)
+                    status_placeholder.markdown(f'<div class="info-card">💬 Tartışma devam ediyor... Kalan süre: {time_remaining:.1f} dakika</div>', unsafe_allow_html=True)
+                    
+                    # Check time limit
+                    if current_time >= end_time:
+                        simulator.stop_simulation()
+                        return
+                    
+                    # Check stop condition
+                    if SIMULATION_STATE['stop_requested']:
+                        simulator.stop_simulation()
+                        return
+                        
+                    await asyncio.sleep(0.5)
+                
+                # Start simulation with extended time
+                await simulator.start_simulation(max_rounds=10, on_new_message=on_new_message)
+            
+            loop.run_until_complete(run_discussion())
+            
+            # Final status
+            if SIMULATION_STATE['stop_requested']:
+                status_placeholder.markdown('<div class="info-card">⏹️ Simülasyon kullanıcı tarafından durduruldu</div>', unsafe_allow_html=True)
+            else:
+                status_placeholder.markdown('<div class="success-card">✅ Simülasyon başarıyla tamamlandı!</div>', unsafe_allow_html=True)
+            
+            progress_placeholder.progress(1.0)
+            
+        except Exception as e:
+            status_placeholder.markdown(f'<div class="error-card">❌ Tartışma hatası: {str(e)}</div>', unsafe_allow_html=True)
+            logger.error(f"Discussion error: {e}")
+        
+        # Final update
+        if simulator.discussion_log:
+            # Show a simple message count update instead of HTML
+            st.info(f"💬 Simülasyon tamamlandı. {len(simulator.discussion_log)} mesaj oluşturuldu.")
+        
+        SIMULATION_STATE['running'] = False
+        st.rerun()
         
     except Exception as e:
-        st.session_state.simulation_running = False
-        status_placeholder.markdown(f'<div class="error-card">❌ Simülasyon hatası: {str(e)}</div>', unsafe_allow_html=True)
-        logger.error(f"Simulation error: {e}")
+        SIMULATION_STATE['running'] = False
+        st.error(f"Simülasyon genel hatası: {str(e)}")
+        logger.error(f"General simulation error: {e}")
+        
+        # Debug information
+        st.markdown("### 🔍 Debug Bilgileri")
+        st.write(f"**Hata:** {str(e)}")
+        st.write(f"**Gündem sayısı:** {len(simulator.agenda_items) if simulator.agenda_items else 0}")
+        st.write(f"**Persona sayısı:** {len(simulator.personas) if simulator.personas else 0}")
+        
+        # API durumu
+        if hasattr(simulator, 'llm_client'):
+            stats = simulator.llm_client.get_request_stats()
+            st.write(f"**API İstatistikleri:** {stats}")
+            
     finally:
         try:
             loop.close()
         except:
             pass
 
-def display_agenda_scores(placeholder):
-    """Display agenda scores and memory summaries"""
-    if not simulator.agenda_items or not simulator.personas:
-        return
-    
-    with placeholder.container():
-        st.markdown("### 📊 Gündem Puanları ve Bellek Özetleri")
-        
-        for agenda_item in simulator.agenda_items:
-            with st.expander(f"📝 {agenda_item.title}", expanded=True):
-                
-                # Scores section
-                if agenda_item.persona_scores:
-                    st.markdown("#### 🎯 İlgi Puanları")
-                    
-                    # Display scores in a responsive grid
-                    score_cols = st.columns(min(len(simulator.personas), 4))
-                    
-                    for i, persona in enumerate(simulator.personas):
-                        with score_cols[i % len(score_cols)]:
-                            score = agenda_item.persona_scores.get(persona.name, "Hesaplanıyor...")
-                            
-                            if isinstance(score, (int, float)):
-                                # Color coding
-                                if score >= 7:
-                                    color = "#10b981"
-                                    icon = "🔥"
-                                elif score >= 4:
-                                    color = "#f59e0b" 
-                                    icon = "⚡"
-                                else:
-                                    color = "#ef4444"
-                                    icon = "💤"
-                                
-                                st.markdown(f"""
-                                <div style="
-                                    background: linear-gradient(135deg, {color}22 0%, {color}11 100%); 
-                                    border: 2px solid {color}44;
-                                    text-align: center;
-                                    padding: 1rem;
-                                    border-radius: 12px;
-                                    margin: 0.5rem 0;
-                                ">
-                                    <div style='font-weight: bold; color: #e2e8f0; margin-bottom: 0.5rem;'>
-                                        {persona.name}
-                                    </div>
-                                    <div style='font-size: 1.5rem; margin: 0.3rem 0;'>
-                                        {icon}
-                                    </div>
-                                    <div style='font-size: 1.4rem; font-weight: bold; color: {color};'>
-                                        {score}/10
-                                    </div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                            else:
-                                st.metric(persona.name, score)
-                    
-                    # Average score
-                    valid_scores = [v for v in agenda_item.persona_scores.values() if isinstance(v, (int, float))]
-                    if valid_scores:
-                        avg_score = sum(valid_scores) / len(valid_scores)
-                        st.markdown(f"""
-                        <div style="
-                            text-align: center; 
-                            margin: 1rem 0; 
-                            padding: 0.8rem; 
-                            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); 
-                            border-radius: 12px; 
-                            color: white; 
-                            font-weight: bold;
-                        ">
-                            📊 Ortalama İlgi Puanı: {avg_score:.1f}/10
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    st.info("⏳ Puanlar henüz hesaplanıyor...")
-                
-                # Memory summaries
-                st.markdown("#### 🧠 Persona Belleklerinde Kalanlar")
-                
-                memory_found = False
-                for persona in simulator.personas:
-                    memory = agenda_item.persona_memories.get(persona.name)
-                    if memory:
-                        st.markdown(f"""
-                        <div style="
-                            background: rgba(139, 92, 246, 0.1);
-                            border-left: 4px solid #8b5cf6;
-                            padding: 1rem;
-                            border-radius: 0 12px 12px 0;
-                            margin: 0.5rem 0;
-                        ">
-                            <div style='font-weight: bold; color: #a855f7; margin-bottom: 0.8rem;'>
-                                🧠 {persona.name}
-                            </div>
-                            <div style='color: #e2e8f0; line-height: 1.5;'>
-                                {html.escape(memory[:150])}{'...' if len(memory) > 150 else ''}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        memory_found = True
-                
-                if not memory_found:
-                    st.markdown("*🔄 Bellek özetleri oluşturuluyor...*")
-
-def update_discussion_display(placeholder):
-    """Update discussion display with improved chat design"""
+def update_discussion_display_simple(placeholder):
+    """Simple discussion display for real-time updates"""
     if not simulator.discussion_log:
         placeholder.info("💬 Tartışma henüz başlamadı...")
         return
 
-    # Show last 12 messages for better performance
-    recent_messages = simulator.discussion_log[-12:]
-
-    chat_html = """
-<div style="
-    background: rgba(15, 23, 42, 0.95);
-    border-radius: 20px;
-    padding: 2rem;
-    margin: 2rem 0;
-    max-height: 600px;
-    overflow-y: auto;
-    border: 1px solid rgba(100, 116, 139, 0.3);
-    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-    width: 100%;
-    box-sizing: border-box;
-">
-"""
+    # Show last 5 messages for performance
+    recent_messages = simulator.discussion_log[-5:]
+    
+    messages_html = """
+    <div style="
+        background: rgba(15, 23, 42, 0.95);
+        border-radius: 15px;
+        padding: 1.5rem;
+        margin: 1rem 0;
+        max-height: 400px;
+        overflow-y: auto;
+        border: 1px solid rgba(100, 116, 139, 0.3);
+    ">
+    """
     
     for entry in recent_messages:
         timestamp = format_message_time(entry['timestamp'])
@@ -693,83 +668,166 @@ def update_discussion_display(placeholder):
             
         is_moderator = speaker == 'Moderatör'
         
-        # Get profile picture
-        pic_path = get_persona_pic(speaker)
-        if pic_path:
-            pic_base64 = get_base64_from_file(pic_path)
-            avatar_html = f'<img src="data:image/png;base64,{pic_base64}" style="width: 50px; height: 50px; border-radius: 50%; margin-right: 1rem; object-fit: cover; border: 3px solid {"#ec4899" if is_moderator else "#6366f1"}; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3); flex-shrink: 0;">'
-        else:
-            avatar_color = "#ec4899" if is_moderator else "#6366f1"
-            avatar_html = f'<div style="width: 50px; height: 50px; border-radius: 50%; margin-right: 1rem; background: {avatar_color}; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; flex-shrink: 0; border: 3px solid {avatar_color}; box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);">{speaker[0].upper()}</div>'
+        # Simple message bubble
+        bubble_color = "#ec4899" if is_moderator else "#6366f1"
         
-        # Styling based on speaker type
-        if is_moderator:
-            bubble_bg = "linear-gradient(135deg, rgba(236, 72, 153, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%)"
-            border_color = "#ec4899"
-            name_color = "#fbbf24"
-        else:
-            bubble_bg = "linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%)"
-            border_color = "#6366f1"
-            name_color = "#a5b4fc"
-        
-        message_escaped = html.escape(message)
-        
-        chat_html += f'''
+        messages_html += f"""
         <div style="
-            display: flex;
-            align-items: flex-start;
-            margin: 1.5rem 0;
-            padding: 1.5rem;
-            border-radius: 18px;
-            background: {bubble_bg};
-            border: 1px solid {border_color}44;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-            animation: fadeIn 0.5s ease-out;
-            max-width: 100%;
-            box-sizing: border-box;
+            margin: 0.8rem 0;
+            padding: 1rem;
+            border-left: 4px solid {bubble_color};
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 8px;
         ">
-            {avatar_html}
-            <div style="flex: 1; min-width: 0;">
-                <div style="
-                    display: flex;
-                    align-items: center;
-                    justify-content: space-between;
-                    margin-bottom: 0.8rem;
-                ">
-                    <div style="
-                        font-weight: 600;
-                        font-size: 1.1rem;
-                        color: {name_color};
-                    ">
-                        {speaker}
-                    </div>
-                    <div style="
-                        font-size: 0.85rem;
-                        color: #94a3b8;
-                        background: rgba(100, 116, 139, 0.2);
-                        padding: 0.3rem 0.8rem;
-                        border-radius: 12px;
-                    ">
-                        {timestamp}
-                    </div>
-                </div>
-                <div style="
-                    color: #e2e8f0;
-                    line-height: 1.6;
-                    font-size: 1rem;
-                    white-space: pre-wrap;
-                    word-break: break-word;
-                ">
-                    {message_escaped}
-                </div>
+            <div style="
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 0.5rem;
+            ">
+                <strong style="color: {'#fbbf24' if is_moderator else '#a5b4fc'};">{speaker}</strong>
+                <span style="font-size: 0.8rem; color: #94a3b8;">{timestamp}</span>
+            </div>
+            <div style="color: #e2e8f0; line-height: 1.5;">
+                {html.escape(message)}
             </div>
         </div>
-        '''
+        """
     
-    chat_html += "</div>"
+    messages_html += "</div>"
     
-    placeholder.markdown(chat_html, unsafe_allow_html=True)
+    placeholder.markdown(messages_html, unsafe_allow_html=True)
+
+def stop_simulation():
+    """Stop the running simulation"""
+    try:
+        SIMULATION_STATE['stop_requested'] = True
+        simulator.stop_simulation()
+        SIMULATION_STATE['running'] = False
+        st.warning("⏹️ Simülasyon durduruldu")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Simülasyon durdurulurken hata: {str(e)}")
+
+def display_simulation_status():
+    """Display simulation status"""
+    if SIMULATION_STATE['running'] or simulator.discussion_log:
+        st.markdown("### 📊 Simülasyon Durumu")
+        
+        # Status display
+        if SIMULATION_STATE['running']:
+            st.markdown('<div class="info-card">🔄 Simülasyon çalışıyor...</div>', unsafe_allow_html=True)
+        elif simulator.discussion_log:
+            st.markdown('<div class="success-card">✅ Simülasyon tamamlandı</div>', unsafe_allow_html=True)
+        
+        # Display scores if available
+        if simulator.agenda_items and any(item.persona_scores for item in simulator.agenda_items):
+            display_agenda_scores()
+
+def display_agenda_scores():
+    """Display agenda scores and memory summaries"""
+    st.markdown("#### 📊 Gündem Puanları")
+    
+    for agenda_item in simulator.agenda_items:
+        if not agenda_item.persona_scores:
+            continue
+            
+        with st.expander(f"📝 {agenda_item.title}"):
+            # Scores section
+            st.markdown("**🎯 İlgi Puanları:**")
+            
+            score_cols = st.columns(min(len(simulator.personas), 4))
+            
+            for i, persona in enumerate(simulator.personas):
+                with score_cols[i % len(score_cols)]:
+                    score = agenda_item.persona_scores.get(persona.name, "Hesaplanıyor...")
+                    
+                    if isinstance(score, (int, float)):
+                        # Color coding
+                        if score >= 7:
+                            color = "#10b981"
+                            icon = "🔥"
+                        elif score >= 4:
+                            color = "#f59e0b" 
+                            icon = "⚡"
+                        else:
+                            color = "#ef4444"
+                            icon = "💤"
+                        
+                        st.markdown(f"""
+                        <div style="
+                            background: rgba(30, 41, 59, 0.8);
+                            border: 2px solid {color};
+                            text-align: center;
+                            padding: 1rem;
+                            border-radius: 12px;
+                            margin: 0.5rem 0;
+                        ">
+                            <div style='font-weight: bold; color: #e2e8f0; margin-bottom: 0.5rem;'>
+                                {persona.name}
+                            </div>
+                            <div style='font-size: 1.5rem; margin: 0.3rem 0;'>
+                                {icon}
+                            </div>
+                            <div style='font-size: 1.4rem; font-weight: bold; color: {color};'>
+                                {score}/10
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.metric(persona.name, score)
+            
+            # Memory summaries
+            st.markdown("**🧠 Persona Belleklerinde Kalanlar:**")
+            
+            for persona in simulator.personas:
+                memory = agenda_item.persona_memories.get(persona.name)
+                if memory:
+                    st.markdown(f"**{persona.name}:** {memory[:200]}{'...' if len(memory) > 200 else ''}")
+
+def display_conversation_section():
+    """Display conversation section at the bottom"""
+    if simulator.discussion_log:
+        st.markdown("---")
+        st.markdown("### 💬 Tartışma Konuşmaları")
+        
+        # Show conversation metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("💬 Toplam Mesaj", len(simulator.discussion_log))
+        with col2:
+            persona_messages = len([entry for entry in simulator.discussion_log if entry['speaker'] != 'Moderatör'])
+            st.metric("👥 Persona Mesajları", persona_messages)
+        with col3:
+            if simulator.discussion_log:
+                last_speaker = simulator.discussion_log[-1]['speaker']
+                st.metric("🎤 Son Konuşan", last_speaker)
+        
+        # Display messages using simple text approach
+        st.markdown("#### 📝 Konuşma Detayları")
+        
+        # Show recent messages in a simple format
+        recent_messages = simulator.discussion_log[-10:]  # Son 10 mesaj
+        
+        for entry in recent_messages:
+            timestamp = format_message_time(entry['timestamp'])
+            speaker = entry['speaker']
+            message = clean_html_and_format_text(entry['message'])
+            
+            if not message or message == '0':
+                continue
+            
+            is_moderator = speaker == 'Moderatör'
+            
+            # Use Streamlit's built-in chat message
+            with st.chat_message("assistant" if is_moderator else "user"):
+                st.markdown(f"**{speaker}** - {timestamp}")
+                st.write(message)
+        
+        # Auto-refresh if simulation is running (less aggressive)
+        if SIMULATION_STATE['running']:
+            time.sleep(3)
+            st.rerun()
 
 def display_analysis_tab():
     """Display analysis tab with both basic and expert analysis"""
@@ -784,40 +842,11 @@ def display_analysis_tab():
     
     with analysis_col1:
         if st.button("📊 Temel Analiz", key="basic_analysis"):
-            st.info("Temel analiz oluşturuluyor...")
-            try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                analysis = loop.run_until_complete(simulator.generate_analysis())
-                st.session_state['analysis_result'] = analysis
-                
-                st.markdown(f"""
-                <div style="
-                    background: rgba(30, 41, 59, 0.95);
-                    border: 1px solid rgba(100, 116, 139, 0.3);
-                    padding: 2rem;
-                    border-radius: 15px;
-                    margin: 1rem 0;
-                    color: #e2e8f0;
-                    white-space: pre-wrap;
-                    line-height: 1.6;
-                ">
-                {analysis}
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.success("✅ Temel analiz tamamlandı!")
-            except Exception as e:
-                st.error(f"Analiz oluşturma hatası: {str(e)}")
-            finally:
-                try:
-                    loop.close()
-                except:
-                    pass
+            generate_basic_analysis()
     
     with analysis_col2:
         if st.button("🔬 Uzman Araştırmacı Analizi", key="expert_analysis"):
-            asyncio.run(generate_expert_research_analysis())
+            generate_expert_analysis()
     
     # Show existing analysis if available
     if st.session_state.get('analysis_result'):
@@ -830,8 +859,81 @@ def display_analysis_tab():
         with st.expander("Detaylı Araştırma Raporu", expanded=False):
             st.markdown(st.session_state['expert_analysis_result'])
 
-async def generate_expert_research_analysis():
-    """Generate comprehensive expert research analysis"""
+def generate_basic_analysis():
+    """Generate basic analysis"""
+    with st.spinner("📊 Temel analiz oluşturuluyor..."):
+        try:
+            # Prepare discussion data
+            full_discussion = ""
+            for entry in simulator.discussion_log:
+                timestamp = entry['timestamp'].strftime("%H:%M:%S")
+                speaker = entry['speaker']
+                message = clean_html_and_format_text(entry['message'])
+                full_discussion += f"[{timestamp}] {speaker}: {message}\n"
+            
+            # Prepare persona info
+            persona_info = ""
+            if simulator.personas:
+                for persona in simulator.personas:
+                    persona_info += f"- {persona.name}: {persona.role}, {persona.personality}\n"
+            
+            # Prepare agenda info
+            agenda_info = ""
+            if simulator.agenda_items:
+                for i, item in enumerate(simulator.agenda_items, 1):
+                    agenda_info += f"{i}. {item.title}\n"
+            
+            # Basic analysis prompt
+            analysis_prompt = f"""[SİSTEM MESAJI]
+Sen bir "Sosyal Araştırmacı"sın. Sana bir odak grup tartışmasının transkripti verilecek. Temel bir analiz raporu hazırla.
+
+[KATILIMCILAR]
+{persona_info}
+
+[TARTIŞILAN KONULAR]
+{agenda_info}
+
+[TARTIŞMA TRANSKRİPTİ]
+{full_discussion}
+
+[TEMEL ANALİZ TALİMATLARI]
+Aşağıdaki başlıkları kullanarak temel bir analiz raporu hazırla:
+
+**1. GENEL DEĞERLENDİRME**
+- Tartışmanın genel atmosferi
+- Katılım düzeyi
+
+**2. ANA GÖRÜŞLER**
+- Ortaya çıkan temel görüşler
+- Uzlaşma ve ayrışma noktaları
+
+**3. KATILIMCI DAVRANIŞLARI**
+- Her katılımcının genel tutumu
+- Etkileşim şekilleri
+
+**4. ÖZET**
+- Ana çıkarımlar
+- Önemli bulgular
+
+Raporunu anlaşılır ve özet bir dille yaz.
+"""
+            
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            analysis = loop.run_until_complete(simulator.llm_client.call_llm(analysis_prompt))
+            st.session_state['analysis_result'] = analysis
+            st.success("✅ Temel analiz tamamlandı!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Analiz oluşturma hatası: {str(e)}")
+        finally:
+            try:
+                loop.close()
+            except:
+                pass
+
+def generate_expert_analysis():
+    """Generate expert analysis"""
     with st.spinner("🔬 Uzman araştırmacı analiz ediyor..."):
         try:
             # Prepare discussion data
@@ -839,12 +941,30 @@ async def generate_expert_research_analysis():
             for entry in simulator.discussion_log:
                 timestamp = entry['timestamp'].strftime("%H:%M:%S")
                 speaker = entry['speaker']
-                message = entry['message']
+                message = clean_html_and_format_text(entry['message'])
                 full_discussion += f"[{timestamp}] {speaker}: {message}\n"
+            
+            # Prepare persona info
+            persona_info = ""
+            if simulator.personas:
+                for persona in simulator.personas:
+                    persona_info += f"- {persona.name}: {persona.role}, {persona.personality}\n"
+            
+            # Prepare agenda info
+            agenda_info = ""
+            if simulator.agenda_items:
+                for i, item in enumerate(simulator.agenda_items, 1):
+                    agenda_info += f"{i}. {item.title}\n"
             
             # Expert analysis prompt
             analysis_prompt = f"""[SİSTEM MESAJI]
 Sen "Prof. Dr. Araştırmacı" adında sosyoloji ve siyaset bilimi alanında uzmanlaşmış bir akademisyensin. Sana bir odak grup tartışmasının tam transkripti verilecek. Kapsamlı bir araştırma raporu hazırla.
+
+[KATILIMCILAR]
+{persona_info}
+
+[TARTIŞILAN KONULAR]
+{agenda_info}
 
 [TARTIŞMA TRANSKRİPTİ]
 {full_discussion}
@@ -893,30 +1013,12 @@ Raporunu akademik standartlarda, objektif ve bilimsel bir dille yaz.
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
-            comprehensive_analysis = await simulator.llm_client.call_llm(analysis_prompt)
+            comprehensive_analysis = loop.run_until_complete(simulator.llm_client.call_llm(analysis_prompt))
             
             # Store analysis result
             st.session_state.expert_analysis_result = comprehensive_analysis
-            
-            # Display the analysis
-            st.markdown(f"""
-            ### 📊 Uzman Araştırmacı Analiz Raporu
-            
-            <div style="
-                background: rgba(30, 41, 59, 0.95);
-                border: 1px solid rgba(100, 116, 139, 0.3);
-                padding: 2rem;
-                border-radius: 15px;
-                margin: 1rem 0;
-                color: #e2e8f0;
-                white-space: pre-wrap;
-                line-height: 1.6;
-            ">
-            {comprehensive_analysis}
-            </div>
-            """, unsafe_allow_html=True)
-            
             st.success("✅ Uzman araştırmacı analizi tamamlandı!")
+            st.rerun()
             
         except Exception as e:
             st.error(f"Araştırma analizi oluşturma hatası: {str(e)}")
@@ -936,97 +1038,112 @@ def display_report_tab():
     
     # PDF creation function
     def create_enhanced_pdf(conversation: List[Dict], analysis: str, personas: List) -> FPDF:
-        """Create enhanced PDF with basic Arial font"""
+        """Create enhanced PDF with Helvetica font"""
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
         
-        # Use basic Arial font
-        pdf.set_font('Arial', 'B', 16)
+        # Use Helvetica font (built-in)
+        pdf.set_font('Helvetica', 'B', 16)
         
         # Title
         pdf.cell(0, 15, 'Odak Grup Simulasyonu Raporu', new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
         pdf.ln(10)
         
         # Date and info
-        pdf.set_font('Arial', '', 12)
+        pdf.set_font('Helvetica', '', 12)
         pdf.cell(0, 8, f'Tarih: {datetime.now().strftime("%d.%m.%Y %H:%M")}', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
         
         # Participants
         if personas:
+            pdf.set_font('Helvetica', 'B', 12)
             pdf.cell(0, 8, 'Katilimcilar:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font('Helvetica', '', 10)
             for persona in personas:
-                name = persona.name.replace('ğ', 'g').replace('ü', 'u').replace('ş', 's').replace('ı', 'i').replace('ö', 'o').replace('ç', 'c')
-                role = persona.role.replace('ğ', 'g').replace('ü', 'u').replace('ş', 's').replace('ı', 'i').replace('ö', 'o').replace('ç', 'c')
+                name = clean_text_for_pdf(persona.name)
+                role = clean_text_for_pdf(persona.role)
                 pdf.cell(0, 6, f'  * {name} ({role})', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(5)
         
         # Discussion section
-        pdf.set_font('Arial', 'B', 14)
+        pdf.set_font('Helvetica', 'B', 14)
         pdf.cell(0, 10, 'Tartisma Gecmisi:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
-        
-        pdf.set_font('Arial', '', 10)
         
         # Add conversation with cleaning
         for entry in conversation:
             timestamp = format_message_time(entry['timestamp'])
-            speaker = entry['speaker']
-            message = str(entry['message'])
-            
-            # Clean Turkish characters
-            speaker = speaker.replace('ğ', 'g').replace('ü', 'u').replace('ş', 's').replace('ı', 'i').replace('ö', 'o').replace('ç', 'c')
-            speaker = speaker.replace('Ğ', 'G').replace('Ü', 'U').replace('Ş', 'S').replace('İ', 'I').replace('Ö', 'O').replace('Ç', 'C')
-            
-            # Clean message
-            message = re.sub(r'<[^>]+>', '', message)  # Remove HTML tags
-            message = message.replace('ğ', 'g').replace('ü', 'u').replace('ş', 's').replace('ı', 'i').replace('ö', 'o').replace('ç', 'c')
-            message = message.replace('Ğ', 'G').replace('Ü', 'U').replace('Ş', 'S').replace('İ', 'I').replace('Ö', 'O').replace('Ç', 'C')
+            speaker = clean_text_for_pdf(entry['speaker'])
+            message = clean_text_for_pdf(clean_html_and_format_text(str(entry['message'])))
             
             # Truncate if too long
-            if len(message) > 250:
-                message = message[:250] + "..."
+            if len(message) > 200:
+                message = message[:200] + "..."
             
-            pdf.set_font('Arial', 'B', 10)
+            # Speaker name
+            pdf.set_font('Helvetica', 'B', 10)
             pdf.cell(0, 6, f"{speaker} [{timestamp}]", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             
-            pdf.set_font('Arial', '', 10)
+            # Message content
+            pdf.set_font('Helvetica', '', 9)
             try:
-                message_clean = message.encode('latin-1', 'replace').decode('latin-1')
-                pdf.multi_cell(0, 5, message_clean)
+                # Split message into lines to avoid width issues
+                max_chars_per_line = 80
+                lines = [message[i:i+max_chars_per_line] for i in range(0, len(message), max_chars_per_line)]
+                for line in lines:
+                    if line.strip():
+                        pdf.cell(0, 5, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             except:
-                message_ascii = message.encode('ascii', 'replace').decode('ascii')
-                pdf.multi_cell(0, 5, message_ascii)
+                pdf.cell(0, 5, "Mesaj görüntülenemiyor", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             
             pdf.ln(2)
         
         # Analysis section
         if analysis:
             pdf.add_page()
-            pdf.set_font('Arial', 'B', 14)
+            pdf.set_font('Helvetica', 'B', 14)
             pdf.cell(0, 10, 'Analiz Raporu:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(5)
             
-            pdf.set_font('Arial', '', 10)
-            
             # Clean analysis
-            analysis_clean = re.sub(r'<[^>]+>', '', analysis)
-            analysis_clean = analysis_clean.replace('ğ', 'g').replace('ü', 'u').replace('ş', 's').replace('ı', 'i').replace('ö', 'o').replace('ç', 'c')
-            analysis_clean = analysis_clean.replace('Ğ', 'G').replace('Ü', 'U').replace('Ş', 'S').replace('İ', 'I').replace('Ö', 'O').replace('Ç', 'C')
+            analysis_clean = clean_text_for_pdf(clean_html_and_format_text(analysis))
             
-            # Split into chunks
-            chunk_size = 1500
-            for i in range(0, len(analysis_clean), chunk_size):
-                chunk = analysis_clean[i:i+chunk_size]
-                try:
-                    chunk_safe = chunk.encode('latin-1', 'replace').decode('latin-1')
-                    pdf.multi_cell(0, 5, chunk_safe)
-                except:
-                    chunk_ascii = chunk.encode('ascii', 'replace').decode('ascii')
-                    pdf.multi_cell(0, 5, chunk_ascii)
+            # Split into manageable chunks
+            pdf.set_font('Helvetica', '', 9)
+            max_chars_per_line = 80
+            lines = [analysis_clean[i:i+max_chars_per_line] for i in range(0, len(analysis_clean), max_chars_per_line)]
+            
+            for line in lines[:100]:  # Limit to first 100 lines
+                if line.strip():
+                    try:
+                        pdf.cell(0, 4, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                    except:
+                        continue
         
         return pdf
+    
+    def clean_text_for_pdf(text):
+        """Clean text for PDF compatibility"""
+        if not text:
+            return ""
+        
+        text = str(text)
+        
+        # Turkish character mapping
+        char_map = {
+            'ğ': 'g', 'Ğ': 'G', 'ü': 'u', 'Ü': 'U',
+            'ş': 's', 'Ş': 'S', 'ı': 'i', 'İ': 'I',
+            'ö': 'o', 'Ö': 'O', 'ç': 'c', 'Ç': 'C'
+        }
+        
+        for tr_char, en_char in char_map.items():
+            text = text.replace(tr_char, en_char)
+        
+        # Remove problematic characters
+        text = ''.join(char for char in text if ord(char) < 128)
+        
+        return text
     
     # Report generation
     if st.button('📄 PDF Raporu Oluştur', key="generate_pdf"):
@@ -1055,36 +1172,16 @@ def display_report_tab():
         except Exception as e:
             st.error(f"PDF oluşturma hatası: {str(e)}")
 
-def display_simulation_content():
-    """Display simulation status and chat at the bottom"""
-    if st.session_state.simulation_running or simulator.discussion_log:
-        st.markdown("---")
-        st.markdown("### 📊 Simülasyon Durumu")
-        
-        # Status metrics
-        if simulator.discussion_log:
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("💬 Toplam Mesaj", len(simulator.discussion_log))
-            
-            with col2:
-                persona_messages = len([entry for entry in simulator.discussion_log if entry['speaker'] != 'Moderatör'])
-                st.metric("👥 Persona Mesajları", persona_messages)
-            
-            with col3:
-                if simulator.discussion_log:
-                    last_speaker = simulator.discussion_log[-1]['speaker']
-                    st.metric("🎤 Son Konuşan", last_speaker)
-            
-            with col4:
-                status_text = "🟢 Aktif" if st.session_state.simulation_running else "⏹️ Tamamlandı"
-                st.metric("⏱️ Durum", status_text)
-
 def reset_simulation():
     """Reset simulation state"""
-    st.session_state.simulation_running = False
-    st.session_state.stop_simulation = False
+    # Stop any running simulation
+    simulator.stop_simulation()
+    
+    # Reset global state
+    SIMULATION_STATE['running'] = False
+    SIMULATION_STATE['stop_requested'] = False
+    
+    # Reset session state
     st.session_state.analysis_result = ""
     st.session_state.expert_analysis_result = ""
     st.session_state.agenda_loaded = False
@@ -1093,19 +1190,10 @@ def reset_simulation():
     simulator.discussion_log = []
     simulator.mcp_logs = []
     simulator.agenda_items = []
+    simulator.memory = {}
     
     st.success("🔄 Simülasyon sıfırlandı!")
     st.rerun()
-
-def stop_simulation():
-    """Stop the running simulation"""
-    try:
-        simulator.stop_simulation()
-        st.session_state.simulation_running = False
-        st.session_state.stop_simulation = True
-        st.warning("⏹️ Simülasyon durduruldu")
-    except Exception as e:
-        st.error(f"Simülasyon durdurulurken hata: {str(e)}")
 
 if __name__ == "__main__":
     main()
