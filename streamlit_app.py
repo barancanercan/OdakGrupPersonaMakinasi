@@ -1,19 +1,3 @@
-import os
-import re
-import json
-import asyncio
-import pandas as pd
-from datetime import datetime
-import time
-import base64
-import html
-from fpdf import FPDF
-from fpdf.enums import XPos, YPos
-import tempfile
-import random
-from typing import Dict, List, Optional
-import logging
-from pathlib import Path
 import streamlit as st
 import os
 import re
@@ -72,36 +56,6 @@ def load_css():
         min-height: 100vh;
     }
     
-    /* Main container styling */
-    .main .block-container {
-        padding: 2rem 1rem;
-        max-width: 1200px;
-    }
-    
-    /* Header and text styling */
-    h1, h2, h3, h4, h5, h6 {
-        color: #f1f5f9 !important;
-        font-family: 'Inter', sans-serif !important;
-        font-weight: 700 !important;
-    }
-    
-    .main-header {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-        text-align: center;
-        font-size: 3rem !important;
-        font-weight: 800 !important;
-        margin-bottom: 2rem !important;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-    }
-    
-    p, div, span, label {
-        color: #cbd5e1 !important;
-        font-family: 'Inter', sans-serif !important;
-    }
-    
     /* Button styling */
     .stButton > button {
         background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
@@ -110,60 +64,21 @@ def load_css():
         border-radius: 12px !important;
         padding: 0.75rem 2rem !important;
         font-weight: 600 !important;
-        font-size: 1rem !important;
-        font-family: 'Inter', sans-serif !important;
         transition: all 0.3s ease !important;
-        box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3) !important;
         width: 100% !important;
-        height: 3rem !important;
-    }
-    
-    .stButton > button:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 12px 30px rgba(99, 102, 241, 0.4) !important;
-        background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%) !important;
     }
     
     .stButton > button:disabled {
         background: linear-gradient(135deg, #374151 0%, #4b5563 100%) !important;
         color: #6b7280 !important;
         border-color: #374151 !important;
-        transform: none !important;
-        box-shadow: none !important;
-        cursor: not-allowed !important;
-    }
-    
-    /* File uploader styling */
-    .stFileUploader {
-        border: 2px dashed #6366f1 !important;
-        border-radius: 15px !important;
-        padding: 2rem !important;
-        background: rgba(51, 65, 85, 0.5) !important;
-        text-align: center !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    .stFileUploader:hover {
-        border-color: #8b5cf6 !important;
-        background: rgba(139, 92, 246, 0.1) !important;
     }
     
     /* Status cards */
-    .status-card {
-        background: rgba(30, 41, 59, 0.8) !important;
-        border-radius: 15px !important;
-        padding: 1.5rem !important;
-        border: 1px solid rgba(100, 116, 139, 0.2) !important;
-        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3) !important;
-        backdrop-filter: blur(15px) !important;
-    }
-    
     .success-card {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
         color: #f0fdf4 !important;
-        border: 1px solid rgba(16, 185, 129, 0.3) !important;
         border-radius: 12px !important;
-        box-shadow: 0 8px 20px rgba(16, 185, 129, 0.2) !important;
         padding: 1rem !important;
         margin: 1rem 0 !important;
     }
@@ -171,9 +86,7 @@ def load_css():
     .error-card {
         background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
         color: #fef2f2 !important;
-        border: 1px solid rgba(239, 68, 68, 0.3) !important;
         border-radius: 12px !important;
-        box-shadow: 0 8px 20px rgba(239, 68, 68, 0.2) !important;
         padding: 1rem !important;
         margin: 1rem 0 !important;
     }
@@ -181,93 +94,9 @@ def load_css():
     .info-card {
         background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%) !important;
         color: #f0f9ff !important;
-        border: 1px solid rgba(14, 165, 233, 0.3) !important;
         border-radius: 12px !important;
-        box-shadow: 0 8px 20px rgba(14, 165, 233, 0.2) !important;
         padding: 1rem !important;
         margin: 1rem 0 !important;
-    }
-    
-    /* Chat styling */
-    .chat-container {
-        background: rgba(15, 23, 42, 0.95);
-        border-radius: 20px;
-        padding: 2rem;
-        margin: 2rem 0;
-        max-height: 600px;
-        overflow-y: auto;
-        border: 1px solid rgba(100, 116, 139, 0.3);
-        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-        width: 100%;
-        box-sizing: border-box;
-    }
-    
-    .message-bubble {
-        background: rgba(30, 41, 59, 0.8);
-        border-radius: 15px;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-left: 4px solid #6366f1;
-        color: #e2e8f0;
-    }
-    
-    .moderator-bubble {
-        border-left-color: #ec4899;
-        background: rgba(236, 72, 153, 0.1);
-    }
-    
-    /* Streamlit-specific components */
-    .stSuccess {
-        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
-        color: #f0fdf4 !important;
-        border: 1px solid rgba(16, 185, 129, 0.3) !important;
-        border-radius: 12px !important;
-    }
-    
-    .stError {
-        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
-        color: #fef2f2 !important;
-        border: 1px solid rgba(239, 68, 68, 0.3) !important;
-        border-radius: 12px !important;
-    }
-    
-    .stInfo {
-        background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%) !important;
-        color: #f0f9ff !important;
-        border: 1px solid rgba(14, 165, 233, 0.3) !important;
-        border-radius: 12px !important;
-    }
-    
-    /* Hide Streamlit elements */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    
-    /* Loading spinner */
-    .loading-spinner {
-        display: inline-block;
-        width: 20px;
-        height: 20px;
-        border: 3px solid rgba(99, 102, 241, 0.3);
-        border-top: 3px solid #6366f1;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-    }
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    
-    /* Responsive design */
-    @media (max-width: 768px) {
-        .main-header {
-            font-size: 2rem !important;
-        }
-        
-        .status-card {
-            padding: 1rem !important;
-        }
     }
     """
     
@@ -313,15 +142,6 @@ def get_persona_pic(persona_name: str) -> Optional[str]:
             return str(pic_path)
     return None
 
-def get_base64_from_file(file_path: str) -> str:
-    """Convert file to base64 string"""
-    try:
-        with open(file_path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except Exception as e:
-        logger.error(f"Error converting file to base64: {e}")
-        return ""
-
 def format_message_time(timestamp: datetime) -> str:
     """Format message timestamp"""
     return timestamp.strftime("%H:%M:%S")
@@ -351,11 +171,8 @@ def clean_html_and_format_text(text):
         return ""
     
     text = str(text)
-    # HTML etiketlerini temizle
     text = re.sub(r'<[^>]+>', '', text)
-    # HTML entitilerini çöz
     text = html.unescape(text)
-    # Fazla boşlukları temizle
     text = ' '.join(text.split())
     text = text.strip()
     
@@ -366,7 +183,7 @@ def main():
     initialize_session_state()
     
     # Header
-    st.markdown('<h1 class="main-header">🎯 Odak Grup Persona Makinası</h1>', unsafe_allow_html=True)
+    st.title("🎯 Odak Grup Persona Makinası")
     
     # Sidebar
     with st.sidebar:
@@ -434,13 +251,11 @@ def display_simulation_tab():
     # File processing
     if uploaded_file is not None:
         try:
-            # Save file
             os.makedirs('data', exist_ok=True)
             file_path = f"data/{uploaded_file.name}"
             with open(file_path, 'wb') as f:
                 f.write(uploaded_file.getvalue())
             
-            # Load and validate data
             if uploaded_file.name.endswith('.csv'):
                 df = pd.read_csv(file_path)
             else:
@@ -451,7 +266,7 @@ def display_simulation_tab():
             if is_valid:
                 if simulator.load_agenda_data(file_path):
                     st.session_state.agenda_loaded = True
-                    st.markdown(f'<div class="success-card">✅ {len(simulator.agenda_items)} gündem maddesi başarıyla yüklendi!</div>', unsafe_allow_html=True)
+                    st.success(f"✅ {len(simulator.agenda_items)} gündem maddesi başarıyla yüklendi!")
                     
                     # Show preview
                     with st.expander("📋 Gündem Önizleme"):
@@ -460,12 +275,12 @@ def display_simulation_tab():
                             st.write(item.content[:200] + "..." if len(item.content) > 200 else item.content)
                             st.divider()
                 else:
-                    st.markdown('<div class="error-card">❌ Dosya yüklenemedi. Lütfen format kontrolü yapın.</div>', unsafe_allow_html=True)
+                    st.error("❌ Dosya yüklenemedi. Lütfen format kontrolü yapın.")
             else:
-                st.markdown(f'<div class="error-card">❌ {message}</div>', unsafe_allow_html=True)
+                st.error(f"❌ {message}")
                 
         except Exception as e:
-            st.markdown(f'<div class="error-card">❌ Dosya işleme hatası: {str(e)}</div>', unsafe_allow_html=True)
+            st.error(f"❌ Dosya işleme hatası: {str(e)}")
     
     # Control buttons
     st.markdown("### 🎮 Simülasyon Kontrolü")
@@ -490,7 +305,6 @@ def display_simulation_tab():
     with button_col1:
         start_enabled = st.session_state.agenda_loaded and not SIMULATION_STATE['running']
         if st.button("▶️ Simülasyonu Başlat", disabled=not start_enabled, key="start_btn"):
-            # API anahtarı kontrolü
             if not check_api_keys():
                 st.error("❌ API anahtarları bulunamadı! Lütfen .env dosyasında GEMINI_API_KEY tanımlayın.")
                 return
@@ -510,8 +324,89 @@ def display_simulation_tab():
     # Simulation status display
     display_simulation_status()
     
-    # Ana içeriğin sonunda konuşmalar bölümünü göster
+    # Conversation section
     display_conversation_section()
+
+async def start_extended_simulation(duration_minutes, status_placeholder, progress_placeholder):
+    """Extended simulation with time-based control"""
+    start_time = time.time()
+    end_time = start_time + (duration_minutes * 60)
+    message_count = 0
+    
+    try:
+        await simulator.prepare_agenda_analysis()
+        
+        while time.time() < end_time and not SIMULATION_STATE['stop_requested']:
+            
+            for agenda_item in simulator.agenda_items:
+                if time.time() >= end_time or SIMULATION_STATE['stop_requested']:
+                    break
+                
+                # Moderator introduces topic
+                moderator_intro = f"Şimdi '{agenda_item.title}' konusunu tartışalım. Görüşlerinizi paylaşabilirsiniz."
+                simulator.discussion_log.append({
+                    'timestamp': datetime.now(),
+                    'speaker': 'Moderatör',
+                    'message': moderator_intro
+                })
+                message_count += 1
+                
+                # Update display
+                await update_simulation_display(start_time, end_time, message_count, status_placeholder, progress_placeholder)
+                await asyncio.sleep(2)
+                
+                # Each persona speaks once per topic
+                agents_copy = list(simulator.agents)
+                random.shuffle(agents_copy)
+                
+                for agent in agents_copy:
+                    if time.time() >= end_time or SIMULATION_STATE['stop_requested']:
+                        break
+                    
+                    # Generate response
+                    context = simulator._build_context()
+                    response = await agent.generate_response(context, agenda_item)
+                    
+                    simulator.discussion_log.append({
+                        'timestamp': datetime.now(),
+                        'speaker': agent.persona.name,
+                        'message': response
+                    })
+                    message_count += 1
+                    
+                    # Update display after each message
+                    await update_simulation_display(start_time, end_time, message_count, status_placeholder, progress_placeholder)
+                    
+                    await asyncio.sleep(3)
+                
+                await asyncio.sleep(2)
+        
+        # Final status
+        if SIMULATION_STATE['stop_requested']:
+            status_placeholder.success("⏹️ Simülasyon kullanıcı tarafından durduruldu")
+        else:
+            status_placeholder.success("✅ Simülasyon başarıyla tamamlandı!")
+        
+        progress_placeholder.progress(1.0)
+        
+    except Exception as e:
+        status_placeholder.error(f"❌ Simülasyon hatası: {str(e)}")
+        logger.error(f"Extended simulation error: {e}")
+
+async def update_simulation_display(start_time, end_time, message_count, status_placeholder, progress_placeholder):
+    """Update simulation display in real-time"""
+    current_time = time.time()
+    elapsed_time = current_time - start_time
+    total_duration = end_time - start_time
+    
+    # Update progress
+    progress = min(elapsed_time / total_duration, 1.0)
+    progress_percentage = 0.5 + (progress * 0.4)
+    progress_placeholder.progress(progress_percentage)
+    
+    # Update status
+    time_remaining = max(0, (end_time - current_time) / 60)
+    status_placeholder.info(f"💬 Tartışma devam ediyor... | Kalan süre: {time_remaining:.1f} dk | Mesaj: {message_count}")
 
 def start_simulation():
     """Start simulation synchronously"""
@@ -520,96 +415,42 @@ def start_simulation():
             st.error("❌ Gündem maddesi bulunamadı!")
             return
             
-        # Prepare and run simulation
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        # Step 1: Prepare agenda analysis
         status_placeholder = st.empty()
         progress_placeholder = st.empty()
         
-        status_placeholder.markdown('<div class="info-card">📊 Gündem analizi başlatılıyor...</div>', unsafe_allow_html=True)
+        status_placeholder.info("📊 Gündem analizi başlatılıyor...")
         progress_placeholder.progress(0.1)
         
         try:
             loop.run_until_complete(simulator.prepare_agenda_analysis())
-            status_placeholder.markdown('<div class="success-card">✅ Gündem analizi tamamlandı!</div>', unsafe_allow_html=True)
+            status_placeholder.success("✅ Gündem analizi tamamlandı!")
             progress_placeholder.progress(0.3)
             
-            # Show scores immediately
             if simulator.agenda_items and any(item.persona_scores for item in simulator.agenda_items):
                 st.markdown("#### 📊 Gündem Puanları Hesaplandı")
                 display_agenda_scores()
             
         except Exception as e:
-            status_placeholder.markdown(f'<div class="error-card">❌ Gündem analizi hatası: {str(e)}</div>', unsafe_allow_html=True)
+            status_placeholder.error(f"❌ Gündem analizi hatası: {str(e)}")
             SIMULATION_STATE['running'] = False
             return
         
-        # Step 2: Start discussion
-        status_placeholder.markdown('<div class="info-card">💬 Tartışma başlatılıyor...</div>', unsafe_allow_html=True)
+        status_placeholder.info("💬 Tartışma başlatılıyor...")
         progress_placeholder.progress(0.5)
         
-        # Discussion container
-        discussion_container = st.empty()
+        discussion_duration_minutes = st.session_state.get('discussion_duration', 15)
         
         try:
-            async def run_discussion():
-                discussion_duration_minutes = st.session_state.get('discussion_duration', 5)
-                start_time = time.time()
-                end_time = start_time + (discussion_duration_minutes * 60)  # Convert to seconds
-                
-                message_count = 0
-                
-                status_placeholder.markdown(f'<div class="info-card">💬 {discussion_duration_minutes} dakikalık tartışma başlatılıyor...</div>', unsafe_allow_html=True)
-                
-                async def on_new_message():
-                    nonlocal message_count
-                    message_count += 1
-                    
-                    # Calculate time-based progress
-                    current_time = time.time()
-                    elapsed_time = current_time - start_time
-                    progress = min(elapsed_time / (discussion_duration_minutes * 60), 1.0)
-                    progress_percentage = 0.5 + (progress * 0.4)
-                    progress_placeholder.progress(progress_percentage)
-                    
-                    # Update status with time remaining
-                    time_remaining = max(0, (end_time - current_time) / 60)
-                    status_placeholder.markdown(f'<div class="info-card">💬 Tartışma devam ediyor... Kalan süre: {time_remaining:.1f} dakika</div>', unsafe_allow_html=True)
-                    
-                    # Check time limit
-                    if current_time >= end_time:
-                        simulator.stop_simulation()
-                        return
-                    
-                    # Check stop condition
-                    if SIMULATION_STATE['stop_requested']:
-                        simulator.stop_simulation()
-                        return
-                        
-                    await asyncio.sleep(0.5)
-                
-                # Start simulation with extended time
-                await simulator.start_simulation(max_rounds=10, on_new_message=on_new_message)
-            
-            loop.run_until_complete(run_discussion())
-            
-            # Final status
-            if SIMULATION_STATE['stop_requested']:
-                status_placeholder.markdown('<div class="info-card">⏹️ Simülasyon kullanıcı tarafından durduruldu</div>', unsafe_allow_html=True)
-            else:
-                status_placeholder.markdown('<div class="success-card">✅ Simülasyon başarıyla tamamlandı!</div>', unsafe_allow_html=True)
-            
-            progress_placeholder.progress(1.0)
+            loop.run_until_complete(start_extended_simulation(discussion_duration_minutes, status_placeholder, progress_placeholder))
             
         except Exception as e:
-            status_placeholder.markdown(f'<div class="error-card">❌ Tartışma hatası: {str(e)}</div>', unsafe_allow_html=True)
+            status_placeholder.error(f"❌ Tartışma hatası: {str(e)}")
             logger.error(f"Discussion error: {e}")
         
-        # Final update
         if simulator.discussion_log:
-            # Show a simple message count update instead of HTML
             st.info(f"💬 Simülasyon tamamlandı. {len(simulator.discussion_log)} mesaj oluşturuldu.")
         
         SIMULATION_STATE['running'] = False
@@ -619,84 +460,12 @@ def start_simulation():
         SIMULATION_STATE['running'] = False
         st.error(f"Simülasyon genel hatası: {str(e)}")
         logger.error(f"General simulation error: {e}")
-        
-        # Debug information
-        st.markdown("### 🔍 Debug Bilgileri")
-        st.write(f"**Hata:** {str(e)}")
-        st.write(f"**Gündem sayısı:** {len(simulator.agenda_items) if simulator.agenda_items else 0}")
-        st.write(f"**Persona sayısı:** {len(simulator.personas) if simulator.personas else 0}")
-        
-        # API durumu
-        if hasattr(simulator, 'llm_client'):
-            stats = simulator.llm_client.get_request_stats()
-            st.write(f"**API İstatistikleri:** {stats}")
             
     finally:
         try:
             loop.close()
         except:
             pass
-
-def update_discussion_display_simple(placeholder):
-    """Simple discussion display for real-time updates"""
-    if not simulator.discussion_log:
-        placeholder.info("💬 Tartışma henüz başlamadı...")
-        return
-
-    # Show last 5 messages for performance
-    recent_messages = simulator.discussion_log[-5:]
-    
-    messages_html = """
-    <div style="
-        background: rgba(15, 23, 42, 0.95);
-        border-radius: 15px;
-        padding: 1.5rem;
-        margin: 1rem 0;
-        max-height: 400px;
-        overflow-y: auto;
-        border: 1px solid rgba(100, 116, 139, 0.3);
-    ">
-    """
-    
-    for entry in recent_messages:
-        timestamp = format_message_time(entry['timestamp'])
-        speaker = entry['speaker']
-        message = clean_html_and_format_text(entry['message'])
-        
-        if not message or message == '0':
-            continue
-            
-        is_moderator = speaker == 'Moderatör'
-        
-        # Simple message bubble
-        bubble_color = "#ec4899" if is_moderator else "#6366f1"
-        
-        messages_html += f"""
-        <div style="
-            margin: 0.8rem 0;
-            padding: 1rem;
-            border-left: 4px solid {bubble_color};
-            background: rgba(30, 41, 59, 0.8);
-            border-radius: 8px;
-        ">
-            <div style="
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-bottom: 0.5rem;
-            ">
-                <strong style="color: {'#fbbf24' if is_moderator else '#a5b4fc'};">{speaker}</strong>
-                <span style="font-size: 0.8rem; color: #94a3b8;">{timestamp}</span>
-            </div>
-            <div style="color: #e2e8f0; line-height: 1.5;">
-                {html.escape(message)}
-            </div>
-        </div>
-        """
-    
-    messages_html += "</div>"
-    
-    placeholder.markdown(messages_html, unsafe_allow_html=True)
 
 def stop_simulation():
     """Stop the running simulation"""
@@ -714,13 +483,18 @@ def display_simulation_status():
     if SIMULATION_STATE['running'] or simulator.discussion_log:
         st.markdown("### 📊 Simülasyon Durumu")
         
-        # Status display
-        if SIMULATION_STATE['running']:
-            st.markdown('<div class="info-card">🔄 Simülasyon çalışıyor...</div>', unsafe_allow_html=True)
-        elif simulator.discussion_log:
-            st.markdown('<div class="success-card">✅ Simülasyon tamamlandı</div>', unsafe_allow_html=True)
+        status_col1, status_col2 = st.columns(2)
         
-        # Display scores if available
+        with status_col1:
+            if SIMULATION_STATE['running']:
+                st.info("🔄 Simülasyon çalışıyor...")
+            elif simulator.discussion_log:
+                st.success("✅ Simülasyon tamamlandı")
+        
+        with status_col2:
+            if SIMULATION_STATE['running'] and simulator.discussion_log:
+                st.metric("Anlık Mesaj Sayısı", len(simulator.discussion_log))
+        
         if simulator.agenda_items and any(item.persona_scores for item in simulator.agenda_items):
             display_agenda_scores()
 
@@ -733,7 +507,6 @@ def display_agenda_scores():
             continue
             
         with st.expander(f"📝 {agenda_item.title}"):
-            # Scores section
             st.markdown("**🎯 İlgi Puanları:**")
             
             score_cols = st.columns(min(len(simulator.personas), 4))
@@ -743,41 +516,15 @@ def display_agenda_scores():
                     score = agenda_item.persona_scores.get(persona.name, "Hesaplanıyor...")
                     
                     if isinstance(score, (int, float)):
-                        # Color coding
                         if score >= 7:
-                            color = "#10b981"
-                            icon = "🔥"
+                            st.success(f"{persona.name}: {score}/10 🔥")
                         elif score >= 4:
-                            color = "#f59e0b" 
-                            icon = "⚡"
+                            st.warning(f"{persona.name}: {score}/10 ⚡")
                         else:
-                            color = "#ef4444"
-                            icon = "💤"
-                        
-                        st.markdown(f"""
-                        <div style="
-                            background: rgba(30, 41, 59, 0.8);
-                            border: 2px solid {color};
-                            text-align: center;
-                            padding: 1rem;
-                            border-radius: 12px;
-                            margin: 0.5rem 0;
-                        ">
-                            <div style='font-weight: bold; color: #e2e8f0; margin-bottom: 0.5rem;'>
-                                {persona.name}
-                            </div>
-                            <div style='font-size: 1.5rem; margin: 0.3rem 0;'>
-                                {icon}
-                            </div>
-                            <div style='font-size: 1.4rem; font-weight: bold; color: {color};'>
-                                {score}/10
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                            st.error(f"{persona.name}: {score}/10 💤")
                     else:
                         st.metric(persona.name, score)
             
-            # Memory summaries
             st.markdown("**🧠 Persona Belleklerinde Kalanlar:**")
             
             for persona in simulator.personas:
@@ -791,7 +538,6 @@ def display_conversation_section():
         st.markdown("---")
         st.markdown("### 💬 Tartışma Konuşmaları")
         
-        # Show conversation metrics
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("💬 Toplam Mesaj", len(simulator.discussion_log))
@@ -803,13 +549,26 @@ def display_conversation_section():
                 last_speaker = simulator.discussion_log[-1]['speaker']
                 st.metric("🎤 Son Konuşan", last_speaker)
         
-        # Display messages using simple text approach
-        st.markdown("#### 📝 Konuşma Detayları")
+        # Show message count selector
+        col_selector, col_spacer = st.columns([2, 2])
+        with col_selector:
+            show_count = st.selectbox(
+                "Gösterilecek mesaj sayısı:",
+                options=[10, 20, 50, "Tümü"],
+                index=0,
+                key="message_display_count"
+            )
         
-        # Show recent messages in a simple format
-        recent_messages = simulator.discussion_log[-10:]  # Son 10 mesaj
+        st.markdown("#### 📝 Konuşma Detayları (En Son Mesajlar Üstte)")
         
-        for entry in recent_messages:
+        # Determine which messages to show
+        if show_count == "Tümü":
+            messages_to_show = list(reversed(simulator.discussion_log))
+        else:
+            messages_to_show = list(reversed(simulator.discussion_log[-show_count:]))
+        
+        # Show messages
+        for entry in messages_to_show:
             timestamp = format_message_time(entry['timestamp'])
             speaker = entry['speaker']
             message = clean_html_and_format_text(entry['message'])
@@ -819,15 +578,9 @@ def display_conversation_section():
             
             is_moderator = speaker == 'Moderatör'
             
-            # Use Streamlit's built-in chat message
             with st.chat_message("assistant" if is_moderator else "user"):
                 st.markdown(f"**{speaker}** - {timestamp}")
                 st.write(message)
-        
-        # Auto-refresh if simulation is running (less aggressive)
-        if SIMULATION_STATE['running']:
-            time.sleep(3)
-            st.rerun()
 
 def display_analysis_tab():
     """Display analysis tab with both basic and expert analysis"""
