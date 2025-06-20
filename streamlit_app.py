@@ -398,16 +398,22 @@ def initialize_session_state():
         st.session_state.analysis_result = ""
     if 'agenda_loaded' not in st.session_state:
         st.session_state.agenda_loaded = False
+    if 'expert_analysis_result' not in st.session_state:
+        st.session_state.expert_analysis_result = ""
 
 # Helper functions
 def get_persona_pic(persona_name: str) -> Optional[str]:
     """Get persona profile picture path"""
+    if persona_name.strip().lower() in ["moderatör", "moderator"]:
+        mod_path = Path('personas_pp/moderator.png')
+        if mod_path.exists():
+            return str(mod_path)
+        else:
+            return None
     pp_dir = Path('personas_pp')
     if not pp_dir.exists():
         return None
-    
     safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', persona_name.lower().replace(' ', '_'))
-    
     for ext in ['.jpg', '.png', '.jpeg']:
         pic_path = pp_dir / f"{safe_name}{ext}"
         if pic_path.exists():
@@ -441,91 +447,49 @@ def validate_agenda_file(df: pd.DataFrame) -> tuple[bool, str]:
     return True, "Dosya başarıyla doğrulandı"
 
 def create_enhanced_pdf(conversation: List[Dict], analysis: str, personas: List) -> FPDF:
-    """Create enhanced PDF with better formatting"""
+    """Create enhanced PDF with better formatting and full Unicode support"""
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
-    
-    # Try to use Unicode font
-    try:
-        pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
-        pdf.add_font('DejaVu', 'B', 'DejaVuSans-Bold.ttf', uni=True)
-        pdf.set_font('DejaVu', '', 16)
-    except:
-        pdf.set_font('Arial', '', 16)
-    
-    # Title
+    # Font paths
+    font_path = 'DejaVuSans.ttf'
+    bold_font_path = 'DejaVuSans-Bold.ttf'
+    if not (os.path.exists(font_path) and os.path.exists(bold_font_path)):
+        st.error('PDF için DejaVuSans.ttf ve DejaVuSans-Bold.ttf dosyaları gereklidir. Lütfen bu fontları proje dizinine ekleyin.')
+        raise RuntimeError('PDF için Unicode font dosyaları eksik.')
+    pdf.add_font('DejaVu', '', font_path)
+    pdf.add_font('DejaVu', 'B', bold_font_path)
+    pdf.set_font('DejaVu', '', 16)
     pdf.cell(0, 15, 'Odak Grup Simülasyonu Raporu', new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
     pdf.ln(10)
-    
-    # Date
-    try:
-        pdf.set_font('DejaVu', '', 12)
-    except:
-        pdf.set_font('Arial', '', 12)
-    
+    pdf.set_font('DejaVu', '', 12)
     pdf.cell(0, 8, f'Tarih: {datetime.now().strftime("%d.%m.%Y %H:%M")}', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(5)
-    
-    # Participants
     if personas:
         pdf.cell(0, 8, 'Katılımcılar:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         for persona in personas:
             pdf.cell(0, 6, f'  • {persona.name} ({persona.role})', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
-    
-    # Conversation
-    try:
-        pdf.set_font('DejaVu', 'B', 14)
-    except:
-        pdf.set_font('Arial', 'B', 14)
-    
+    pdf.set_font('DejaVu', 'B', 14)
     pdf.cell(0, 10, 'Tartışma Geçmişi:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(5)
-    
-    try:
-        pdf.set_font('DejaVu', '', 10)
-    except:
-        pdf.set_font('Arial', '', 10)
-    
+    pdf.set_font('DejaVu', '', 10)
     for entry in conversation:
         timestamp = format_message_time(entry['timestamp'])
         speaker = entry['speaker']
         message = entry['message'][:200] + "..." if len(entry['message']) > 200 else entry['message']
-        
-        try:
-            pdf.set_font('DejaVu', 'B', 10)
-        except:
-            pdf.set_font('Arial', 'B', 10)
-        
+        pdf.set_font('DejaVu', 'B', 10)
         pdf.cell(0, 6, f"{speaker} [{timestamp}]", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        
-        try:
-            pdf.set_font('DejaVu', '', 10)
-        except:
-            pdf.set_font('Arial', '', 10)
-        
+        pdf.set_font('DejaVu', '', 10)
         pdf.multi_cell(0, 5, message)
         pdf.ln(2)
-    
-    # Analysis
     if analysis:
         pdf.add_page()
-        try:
-            pdf.set_font('DejaVu', 'B', 14)
-        except:
-            pdf.set_font('Arial', 'B', 14)
-        
+        pdf.set_font('DejaVu', 'B', 14)
         pdf.cell(0, 10, 'Analiz Raporu:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
-        
-        try:
-            pdf.set_font('DejaVu', '', 10)
-        except:
-            pdf.set_font('Arial', '', 10)
-        
+        pdf.set_font('DejaVu', '', 10)
         pdf.multi_cell(0, 5, analysis)
-    
     return pdf
 
 # Main app
@@ -640,7 +604,7 @@ def main():
             if st.button("⏹️ Durdur", disabled=not st.session_state.simulation_running, key="stop_btn"):
                 st.session_state.stop_simulation = True
                 st.session_state.simulation_running = False
-                simulator.stop_simulation()
+                stop_simulation()
                 st.success("Simülasyon durduruldu")
         
         with button_col3:
@@ -657,111 +621,30 @@ def main():
     with main_tabs[2]:
         display_report_tab()
 
+# --- Simülasyon başlatma fonksiyonu ---
 def run_simulation():
-    """Run the focus group simulation"""
+    """Odak grup simülasyonunu başlat"""
     if not simulator.agenda_items:
         st.error("Gündem maddesi bulunamadı!")
         return
-    
-    # Create placeholders
     status_placeholder = st.empty()
     progress_placeholder = st.empty()
     memory_placeholder = st.empty()
     discussion_placeholder = st.empty()
-    
     try:
-        # Create new event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
         async def simulation_runner():
-            # Initialize
             status_placeholder.markdown('<div class="status-card">🚀 Simülasyon başlatılıyor...</div>', unsafe_allow_html=True)
-            
-            # Score agenda items
-            await simulator.score_agenda_items()
-            
-            # Display scores
+            await simulator.prepare_agenda_analysis()
             display_agenda_scores()
-            
-            # Run simulation
-            max_rounds = 3
-            total_steps = len(simulator.agenda_items) * max_rounds * len(simulator.agents)
-            current_step = 0
-            
-            for agenda_idx, agenda_item in enumerate(simulator.agenda_items):
-                if st.session_state.stop_simulation:
-                    break
-                
-                # Moderator introduction
-                moderator_intro = f"Merhaba, bugün '{agenda_item.title}' konusunu konuşmak üzere toplandık."
-                simulator.discussion_log.append({
-                    'timestamp': datetime.now(),
-                    'speaker': 'Moderatör',
-                    'message': moderator_intro
-                })
-                
-                update_discussion_display(discussion_placeholder)
-                await asyncio.sleep(1)
-                
-                # Discussion rounds
-                for round_idx in range(max_rounds):
-                    if st.session_state.stop_simulation:
-                        break
-                    
-                    # Randomize speaking order
-                    agent_indices = list(range(len(simulator.agents)))
-                    random.shuffle(agent_indices)
-                    
-                    for speaker_idx, agent_idx in enumerate(agent_indices):
-                        if st.session_state.stop_simulation:
-                            break
-                        
-                        agent = simulator.agents[agent_idx]
-                        current_step += 1
-                        
-                        # Update progress
-                        progress = current_step / total_steps
-                        progress_placeholder.progress(progress)
-                        
-                        # Update status
-                        status_text = f"""
-                        <div class="status-card">
-                            <div style="display: flex; align-items: center; gap: 1rem;">
-                                <div class="loading-spinner"></div>
-                                <div>
-                                    <strong>Gündem:</strong> {agenda_item.title}<br>
-                                    <strong>Tur:</strong> {round_idx + 1}/{max_rounds}<br>
-                                    <strong>Konuşan:</strong> {agent.persona.name}
-                                </div>
-                            </div>
-                        </div>
-                        """
-                        status_placeholder.markdown(status_text, unsafe_allow_html=True)
-                        
-                        # Generate response
-                        context = simulator._build_context()
-                        response = await agent.generate_response(context, agenda_item)
-                        
-                        simulator.discussion_log.append({
-                            'timestamp': datetime.now(),
-                            'speaker': agent.persona.name,
-                            'message': response
-                        })
-                        
-                        update_discussion_display(discussion_placeholder)
-                        update_memory_display(memory_placeholder)
-                        
-                        await asyncio.sleep(2)
-            
-            # Simulation completed
+            await simulator.start_simulation()
             st.session_state.simulation_running = False
             status_placeholder.markdown('<div class="success-card">✅ Simülasyon tamamlandı!</div>', unsafe_allow_html=True)
             progress_placeholder.progress(1.0)
-        
-        # Run simulation
+            update_discussion_display(discussion_placeholder)
+            update_memory_display(memory_placeholder)
         loop.run_until_complete(simulation_runner())
-        
     except Exception as e:
         st.session_state.simulation_running = False
         st.error(f"Simülasyon hatası: {str(e)}")
@@ -771,103 +654,44 @@ def run_simulation():
         except:
             pass
 
+# --- Gündem puanları ve bellek özetleri ---
 def display_agenda_scores():
-    """Display agenda item scores with proper MCP integration"""
     if not simulator.agenda_items or not simulator.personas:
         return
-    
     st.markdown("### 📊 Gündem Puanları ve Bellek Özetleri")
-    
     for agenda_item in simulator.agenda_items:
         with st.expander(f"📝 {agenda_item.title}", expanded=True):
-            
-            # Show individual scores if available
-            scores_available = False
-            individual_scores = {}
-            
-            # Check if we have individual scores in MCP logs
-            if hasattr(simulator, 'mcp_logs'):
-                for log in simulator.mcp_logs:
-                    if (log.get('type') == 'score' and 
-                        agenda_item.title in log.get('prompt', '')):
-                        
-                        # Try to extract persona name and score
-                        prompt = log.get('prompt', '')
-                        response = log.get('response', '')
-                        
-                        for persona in simulator.personas:
-                            if persona.name in prompt:
-                                try:
-                                    # Extract numeric score from response
-                                    import re
-                                    score_match = re.search(r'\d+\.?\d*', response)
-                                    if score_match:
-                                        score = float(score_match.group())
-                                        score = min(max(score, 1), 10)  # Ensure 1-10 range
-                                        individual_scores[persona.name] = score
-                                        scores_available = True
-                                except:
-                                    continue
-            
-            if scores_available:
-                # Display individual scores in columns
+            # Skorlar
+            if agenda_item.persona_scores:
                 score_cols = st.columns(len(simulator.personas))
                 for idx, persona in enumerate(simulator.personas):
                     with score_cols[idx]:
-                        score = individual_scores.get(persona.name, "Hesaplanıyor...")
+                        score = agenda_item.persona_scores.get(persona.name, "Hesaplanıyor...")
                         if isinstance(score, (int, float)):
-                            # Create a colorful score display
                             color = "#10b981" if score >= 7 else "#f59e0b" if score >= 4 else "#ef4444"
                             st.markdown(f"""
-                            <div style="
-                                text-align: center;
-                                padding: 1rem;
-                                background: linear-gradient(135deg, {color}22 0%, {color}11 100%);
-                                border: 2px solid {color}44;
-                                border-radius: 10px;
-                                margin: 0.5rem 0;
-                            ">
-                                <div style="font-weight: bold; color: #e2e8f0; margin-bottom: 0.5rem;">
-                                    {persona.name}
-                                </div>
-                                <div style="font-size: 1.5rem; font-weight: bold; color: {color};">
-                                    {score}/10
-                                </div>
+                            <div style="text-align: center; padding: 1rem; background: linear-gradient(135deg, {color}22 0%, {color}11 100%); border: 2px solid {color}44; border-radius: 10px; margin: 0.5rem 0;">
+                                <div style="font-weight: bold; color: #e2e8f0; margin-bottom: 0.5rem;">{persona.name}</div>
+                                <div style="font-size: 1.5rem; font-weight: bold; color: {color};">{score}/10</div>
                             </div>
                             """, unsafe_allow_html=True)
                         else:
                             st.metric(persona.name, score)
-                
-                # Show average score
-                if individual_scores:
-                    avg_score = sum(individual_scores.values()) / len(individual_scores)
+                if agenda_item.persona_scores:
+                    avg_score = sum([v for v in agenda_item.persona_scores.values() if isinstance(v, (int, float))]) / max(1, len([v for v in agenda_item.persona_scores.values() if isinstance(v, (int, float))]))
                     st.markdown(f"""
-                    <div style="
-                        text-align: center;
-                        margin-top: 1rem;
-                        padding: 0.5rem;
-                        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-                        border-radius: 8px;
-                        color: white;
-                        font-weight: bold;
-                    ">
-                        Ortalama Puan: {avg_score:.1f}/10
-                    </div>
+                    <div style="text-align: center; margin-top: 1rem; padding: 0.5rem; background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); border-radius: 8px; color: white; font-weight: bold;">Ortalama Puan: {avg_score:.1f}/10</div>
                     """, unsafe_allow_html=True)
             else:
                 st.info("⏳ Puanlar henüz hesaplanıyor...")
-            
-            # Show memory summaries if available
+            # Bellek özetleri
             st.markdown("**🧠 Persona Belleklerinde Kalanlar:**")
             memory_found = False
-            
             for persona in simulator.personas:
-                memory_key = (persona.name, agenda_item.title)
-                if hasattr(simulator, 'memory') and memory_key in simulator.memory:
-                    memory_summary = simulator.memory[memory_key]
-                    st.markdown(f"**{persona.name}:** {memory_summary}")
+                memory = agenda_item.persona_memories.get(persona.name)
+                if memory:
+                    st.markdown(f"**{persona.name}:** {memory[:150]}...")
                     memory_found = True
-            
             if not memory_found:
                 st.markdown("*Henüz bellek özetleri oluşturulmadı.*")
 
@@ -908,38 +732,37 @@ def update_discussion_display(placeholder):
     placeholder.markdown(discussion_html, unsafe_allow_html=True)
 
 def update_memory_display(placeholder):
-    """Update memory display"""
-    if not hasattr(simulator, 'memory') or not simulator.memory:
+    """Update memory display using agenda_item.persona_memories"""
+    if not simulator.agenda_items or not simulator.personas:
         placeholder.markdown("**🧠 Persona Belleği:** Henüz bellek verisi yok.")
         return
-    
-    # Group memories by agenda item
-    memory_by_agenda = {}
-    for (persona_name, agenda_title), summary in simulator.memory.items():
-        if agenda_title not in memory_by_agenda:
-            memory_by_agenda[agenda_title] = []
-        memory_by_agenda[agenda_title].append((persona_name, summary))
-    
-    # Display memories in expanders
+    memory_found = False
     with placeholder:
         st.markdown("### 🧠 Persona Belleği")
-        for agenda_title, memories in memory_by_agenda.items():
-            with st.expander(f"📝 {agenda_title}"):
-                for persona_name, summary in memories:
-                    st.markdown(f"**{persona_name}:** {summary[:150]}...")
-                    st.divider()
+        for agenda_item in simulator.agenda_items:
+            if not agenda_item.persona_memories:
+                continue
+            with st.expander(f"📝 {agenda_item.title}"):
+                for persona in simulator.personas:
+                    memory = agenda_item.persona_memories.get(persona.name)
+                    if memory:
+                        st.markdown(f"**{persona.name}:** {memory[:300]}..." if len(memory) > 300 else f"**{persona.name}:** {memory}")
+                        memory_found = True
+    if not memory_found:
+        placeholder.markdown("**🧠 Persona Belleği:** Henüz bellek verisi yok.")
 
 def display_simulation_content():
     """Display simulation content area"""
     if st.session_state.simulation_running or simulator.discussion_log:
         st.markdown("### 💬 Canlı Tartışma")
-        
-        # Create containers for dynamic updates
         discussion_container = st.container()
-        
         with discussion_container:
             if simulator.discussion_log:
                 for entry in simulator.discussion_log:
+                    # Sadece boş olmayan ve 0 olmayan mesajları göster
+                    msg = str(entry.get('message', '')).strip()
+                    if not msg or msg == '0':
+                        continue
                     display_single_message(entry)
             else:
                 st.info("Tartışma henüz başlamadı...")
@@ -948,133 +771,398 @@ def display_single_message(entry):
     """Display a single message in the discussion"""
     timestamp = format_message_time(entry['timestamp'])
     speaker = entry['speaker']
-    message = entry['message']
-    
+    message = str(entry['message']).strip()
+    if not message or message == '0':
+        return  # Boş veya 0 mesajları gösterme
     is_moderator = speaker == 'Moderatör'
-    
-    # Create a container for each message
     with st.container():
-        # Create message header with profile pic and name
-        col1, col2 = st.columns([1, 20])  # Wider content column
-        
+        col1, col2 = st.columns([1, 20])
         with col1:
             pic_path = get_persona_pic(speaker)
             if pic_path:
                 st.image(pic_path, width=50)
             else:
                 st.markdown("🎙️" if is_moderator else "👤")
-        
         with col2:
-            # Header with name and timestamp
             header_col1, header_col2 = st.columns([3, 1])
             with header_col1:
                 speaker_emoji = "🎙️" if is_moderator else "👤"
                 st.markdown(f"**{speaker_emoji} {speaker}**")
             with header_col2:
                 st.markdown(f"*{timestamp}*")
-            
-            # Message content with proper styling
-            if is_moderator:
-                st.markdown(f"""
-                <div style="
-                    background: linear-gradient(135deg, rgba(236, 72, 153, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%);
-                    border-left: 4px solid #ec4899;
-                    padding: 1rem;
-                    border-radius: 0 10px 10px 0;
-                    margin: 0.5rem 0;
-                    color: #e2e8f0;
-                    word-wrap: break-word;
-                    overflow-wrap: break-word;
-                    white-space: pre-wrap;
-                ">
-                {html.escape(message)}
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div style="
-                    background: rgba(51, 65, 85, 0.8);
-                    border-left: 4px solid #6366f1;
-                    padding: 1rem;
-                    border-radius: 0 10px 10px 0;
-                    margin: 0.5rem 0;
-                    color: #e2e8f0;
-                    word-wrap: break-word;
-                    overflow-wrap: break-word;
-                    white-space: pre-wrap;
-                    min-height: 60px;
-                ">
-                {html.escape(message)}
-                </div>
-                """, unsafe_allow_html=True)
-        
-        # Add some spacing
+            bubble_style = (
+                "background: linear-gradient(135deg, rgba(236, 72, 153, 0.15) 0%, rgba(139, 92, 246, 0.15) 100%); border-left: 4px solid #ec4899; "
+                if is_moderator else
+                "background: rgba(51, 65, 85, 0.8); border-left: 4px solid #6366f1; min-height: 60px; "
+            )
+            bubble_style += "padding: 1rem; border-radius: 0 10px 10px 0; margin: 0.5rem 0; color: #e2e8f0; word-break: break-word; overflow-wrap: break-word; white-space: pre-wrap; max-width: 100%;"
+            # Only escape once, and allow HTML
+            st.markdown(f"""
+            <div style='{bubble_style}'>
+            {html.escape(message)}
+            </div>
+            """, unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-def display_analysis_tab():
-    """Display analysis tab content"""
-    st.markdown("### 📊 Tartışma Analizi")
+async def generate_expert_research_analysis():
+    """Generate comprehensive expert research analysis with thinking layer"""
     
-    if not simulator.discussion_log:
-        st.markdown('<div class="info-card">ℹ️ Analiz için önce bir simülasyon çalıştırın</div>', unsafe_allow_html=True)
-        return
-    
-    # Analysis controls
-    col1, col2, col3 = st.columns([2, 1, 1])
-    
-    with col1:
-        if st.button("🔍 Detaylı Analiz Oluştur", key="generate_analysis"):
-            generate_analysis()
-    
-    with col2:
-        analysis_type = st.selectbox(
-            "Analiz Türü",
-            ["Genel Analiz", "Sentiment Analizi", "Tema Analizi", "Etkileşim Analizi"],
-            key="analysis_type"
-        )
-    
-    with col3:
-        export_format = st.selectbox(
-            "Dışa Aktarma",
-            ["Metin", "JSON", "CSV"],
-            key="export_format"
-        )
-    
-    # Display existing analysis if available
-    if st.session_state.analysis_result:
-        st.markdown("### 📋 Analiz Sonuçları")
-        
-        # Analysis tabs
-        analysis_tabs = st.tabs(["📊 Genel Özet", "👥 Persona Analizi", "💬 Etkileşim Haritası", "📈 İstatistikler"])
-        
-        with analysis_tabs[0]:
-            display_general_analysis()
-        
-        with analysis_tabs[1]:
-            display_persona_analysis()
-        
-        with analysis_tabs[2]:
-            display_interaction_analysis()
-        
-        with analysis_tabs[3]:
-            display_statistics()
-    
-    # Quick stats
-    display_quick_stats()
-
-def generate_analysis():
-    """Generate comprehensive analysis"""
-    with st.spinner("Analiz oluşturuluyor... Bu birkaç dakika sürebilir."):
+    with st.spinner("🔬 Uzman araştırmacı analiz ediyor... Bu süreç birkaç dakika sürebilir."):
         try:
+            # Create expert researcher with thinking capability
+            research_analysis_placeholder = st.empty()
+            
+            # Step 1: Thinking Phase
+            research_analysis_placeholder.markdown("""
+            <div class="status-card">
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <div class="loading-spinner"></div>
+                    <div>
+                        <strong>🧠 Araştırmacı Düşünüyor...</strong><br>
+                        <small>Tartışma verilerini analiz ediyor, kalıpları tespit ediyor</small>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Prepare discussion data
+            full_discussion = ""
+            for entry in simulator.discussion_log:
+                timestamp = entry['timestamp'].strftime("%H:%M:%S")
+                speaker = entry['speaker']
+                message = entry['message']
+                full_discussion += f"[{timestamp}] {speaker}: {message}\n"
+            
+            # Thinking prompt
+            thinking_prompt = f"""[SİSTEM MESAJI]
+Sen "Prof. Dr. Araştırmacı" adında sosyoloji ve siyaset bilimi alanında uzmanlaşmış bir akademisyensin. Sana bir odak grup tartışmasının tam transkripti verilecek. Bu tartışmayı derinlemesine analiz etmeden önce, düşüncelerini aşama aşama organize et.
+
+[TARTIŞMA TRANSKRİPTİ]
+{full_discussion}
+
+[DÜŞÜNCE AŞAMALARI]
+Lütfen analiz yapmadan önce şu aşamaları takip et:
+
+1. **İlk İzlenim**: Tartışmayı genel olarak nasıl değerlendiriyorsun?
+2. **Katılımcı Profilleri**: Her katılımcının karakteristik özelliklerini nasıl gözlemliyorsun?
+3. **Tema Tespiti**: Hangi ana temalar ve alt konular ortaya çıkıyor?
+4. **Etkileşim Kalıpları**: Katılımcılar arasındaki etkileşim nasıl gelişiyor?
+5. **Sosyolojik Bulgular**: Hangi toplumsal dinamikleri fark ediyorsun?
+6. **Politik Boyutlar**: Siyasi eğilimler ve görüş farklılıkları nasıl?
+
+Bu düşünce aşamalarını detaylandır ve sonrasında analiz aşamasına geç.
+"""
+            
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             
+            thinking_response = await simulator.llm_client.call_llm(thinking_prompt)
+            
+            # Show thinking process
+            research_analysis_placeholder.markdown(f"""
+            ### 🧠 Araştırmacının Düşünce Süreci
+            
+            <div style="
+                background: rgba(51, 65, 85, 0.8);
+                border-left: 4px solid #8b5cf6;
+                padding: 1.5rem;
+                border-radius: 0 10px 10px 0;
+                margin: 1rem 0;
+                color: #e2e8f0;
+                white-space: pre-wrap;
+            ">
+            {thinking_response}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            await asyncio.sleep(2)
+            
+            # Step 2: Detailed Analysis Phase
+            st.markdown("---")
+            analysis_placeholder = st.empty()
+            
+            analysis_placeholder.markdown("""
+            <div class="status-card">
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <div class="loading-spinner"></div>
+                    <div>
+                        <strong>📊 Detaylı Analiz Yapılıyor...</strong><br>
+                        <small>Sosyolojik ve politik bulgular raporlanıyor</small>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Comprehensive analysis prompt
+            analysis_prompt = f"""[SİSTEM MESAJI]
+Sen "Prof. Dr. Araştırmacı" adında sosyoloji ve siyaset bilimi alanında uzmanlaşmış bir akademisyensin. Düşünce sürecini tamamladın, şimdi kapsamlı bir araştırma raporu hazırla.
+
+[ÖNCEDEN YAPILAN DÜŞÜNCE SÜRECİ]
+{thinking_response}
+
+[TARTIŞMA TRANSKRİPTİ]
+{full_discussion}
+
+[ARAŞTIRMA RAPORU TALİMATLARI]
+Aşağıdaki başlıkları kullanarak akademik düzeyde, detaylı bir analiz raporu hazırla:
+
+**1. YÖNETİCİ ÖZETİ**
+- Araştırmanın amacı ve kapsamı
+- Ana bulgular (3-4 madde)
+- Önemli sonuçlar ve öneriler
+
+**2. KATILIMCI ANALİZİ**
+- Her katılımcının demografik ve psikografik profili
+- Konuşma tarzları ve dil kullanımları
+- Dominant karakteristik özellikler
+- Grup içindeki rolleri (lider, takipçi, muhalif, vb.)
+
+**3. TEMA VE İÇERİK ANALİZİ**
+- Ortaya çıkan ana temalar ve alt konular
+- En çok tartışılan konular
+- Uzlaşma ve çelişki alanları
+- Değinilmeyen ama önemli olan konular
+
+**4. ETKİLEŞİM DİNAMİKLERİ**
+- Katılımcılar arası etkileşim kalıpları
+- İttifak ve karşıtlık ilişkileri
+- Söz alma sıklığı ve süresi analizi
+- Moderatörün etkisi ve yönlendirmeleri
+
+**5. SOSYOLOJİK BULGULAR**
+- Toplumsal sınıf, yaş, cinsiyet etkilerinin analizi
+- Kültürel sermaye farklılıkları
+- Sosyal kimlik ve aidiyetlerin etkisi
+- Grup dinamikleri ve sosyal baskı
+
+**6. POLİTİK BOYUT ANALİZİ**
+- Siyasi eğilimler ve ideolojik konumlanmalar
+- Parti bağlılığı ve siyasi kimlik etkileri
+- Polarizasyon ve kutuplaşma seviyeleri
+- Demokratik katılım ve müzakere kalitesi
+
+**7. SÖYLEM ANALİZİ**
+- Kullanılan dil ve retorik stratejiler
+- Metaforlar, semboller ve anlam çerçeveleri
+- Duygusal ve rasyonel argüman dengeleri
+- İkna teknikleri ve retorik gücü
+
+**8. SOSYAL PSİKOLOJİK BOYUTLAR**
+- Grup düşüncesi (groupthink) eğilimleri
+- Sosyal onay arayışı ve uyum davranışları
+- Önyargılar ve stereotiplerin etkisi
+- Duygusal zeka ve empati seviyeleri
+
+**9. SONUÇ VE ÖNERİLER**
+- Araştırmanın temel bulguları
+- Toplumsal ve politik çıkarımlar
+- Politika yapıcılar için öneriler
+- Gelecek araştırmalar için yönlendirmeler
+
+**10. METODOLOJİK DEĞERLENDİRME**
+- Odak grup tekniğinin etkinliği
+- Veri kalitesi ve güvenilirlik
+- Sınırlılıklar ve önyargı riskleri
+- Genellenebilirlik düzeyi
+
+Raporunu akademik standartlarda, objektif ve bilimsel bir dille yaz. Somut örneklerle destekle ve eleştirel bir yaklaşım sergile.
+"""
+            
+            comprehensive_analysis = await simulator.llm_client.call_llm(analysis_prompt)
+            
+            # Store analysis result
+            st.session_state.expert_analysis_result = comprehensive_analysis
+            
+            # Display the comprehensive analysis
+            analysis_placeholder.markdown(f"""
+            ### 📊 Uzman Araştırmacı Analiz Raporu
+            
+            <div style="
+                background: rgba(30, 41, 59, 0.95);
+                border: 1px solid rgba(100, 116, 139, 0.3);
+                padding: 2rem;
+                border-radius: 15px;
+                margin: 1rem 0;
+                color: #e2e8f0;
+                white-space: pre-wrap;
+                line-height: 1.6;
+            ">
+            {comprehensive_analysis}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.success("✅ Uzman araştırmacı analizi tamamlandı!")
+            
+            # Add download options
+            st.markdown("### 📥 Araştırma Raporunu İndir")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📄 PDF Rapor İndir", key="download_research_pdf"):
+                    generate_research_pdf_report(thinking_response, comprehensive_analysis)
+            
+            with col2:
+                if st.button("📋 Metin Rapor İndir", key="download_research_txt"):
+                    generate_research_text_report(thinking_response, comprehensive_analysis)
+            
+        except Exception as e:
+            st.error(f"Araştırma analizi oluşturma hatası: {str(e)}")
+        finally:
+            try:
+                loop.close()
+            except:
+                pass
+
+def generate_research_pdf_report(thinking_process, analysis):
+    """Generate detailed research PDF report"""
+    try:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        
+        # Try to use Unicode font
+        try:
+            pdf.add_font('DejaVu', '', 'DejaVuSans.ttf', uni=True)
+            pdf.add_font('DejaVu', 'B', 'DejaVuSans-Bold.ttf', uni=True)
+            pdf.set_font('DejaVu', 'B', 16)
+        except:
+            pdf.set_font('Arial', 'B', 16)
+        
+        # Title
+        pdf.cell(0, 15, 'UZMAN ARAŞTIRMACI ANALİZ RAPORU', new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
+        pdf.ln(10)
+        
+        # Date and info
+        try:
+            pdf.set_font('DejaVu', '', 12)
+        except:
+            pdf.set_font('Arial', '', 12)
+        
+        pdf.cell(0, 8, f'Tarih: {datetime.now().strftime("%d.%m.%Y %H:%M")}', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, f'Araştırmacı: Prof. Dr. Sosyoloji & Siyaset Uzmanı', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(10)
+        
+        # Thinking Process
+        try:
+            pdf.set_font('DejaVu', 'B', 14)
+        except:
+            pdf.set_font('Arial', 'B', 14)
+        
+        pdf.cell(0, 10, 'DÜŞÜNCE SÜRECİ', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        try:
+            pdf.set_font('DejaVu', '', 10)
+        except:
+            pdf.set_font('Arial', '', 10)
+        
+        pdf.multi_cell(0, 6, thinking_process[:1500] + "..." if len(thinking_process) > 1500 else thinking_process)
+        pdf.ln(5)
+        
+        # Analysis
+        try:
+            pdf.set_font('DejaVu', 'B', 14)
+        except:
+            pdf.set_font('Arial', 'B', 14)
+        
+        pdf.cell(0, 10, 'DETAYLI ANALİZ RAPORU', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+        try:
+            pdf.set_font('DejaVu', '', 10)
+        except:
+            pdf.set_font('Arial', '', 10)
+        
+        # Split analysis into pages if needed
+        analysis_text = analysis
+        while len(analysis_text) > 0:
+            chunk = analysis_text[:2000]  # 2000 character chunks
+            pdf.multi_cell(0, 5, chunk)
+            analysis_text = analysis_text[2000:]
+            
+            if len(analysis_text) > 0:
+                pdf.add_page()
+        
+        # Download
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmpfile:
+            pdf.output(tmpfile.name)
+            
+            with open(tmpfile.name, 'rb') as f:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f'uzman_arastirmaci_analizi_{timestamp}.pdf'
+                
+                st.download_button(
+                    label="📥 Araştırma Raporu PDF İndir",
+                    data=f.read(),
+                    file_name=filename,
+                    mime='application/pdf',
+                    key="download_expert_pdf"
+                )
+        
+        st.success("✅ PDF raporu hazır!")
+        
+    except Exception as e:
+        st.error(f"PDF oluşturma hatası: {str(e)}")
+
+def generate_research_text_report(thinking_process, analysis):
+    """Generate detailed research text report"""
+    try:
+        timestamp = datetime.now().strftime("%d.%m.%Y %H:%M")
+        
+        report_text = f"""
+========================================
+UZMAN ARAŞTIRMACI ANALİZ RAPORU
+========================================
+
+Tarih: {timestamp}
+Araştırmacı: Prof. Dr. Sosyoloji & Siyaset Uzmanı
+Analiz Türü: Odak Grup Tartışması Derinlemesine Analizi
+
+========================================
+DÜŞÜNCE SÜRECİ
+========================================
+
+{thinking_process}
+
+========================================
+DETAYLI ANALİZ RAPORU
+========================================
+
+{analysis}
+
+========================================
+RAPOR SONU
+========================================
+
+Bu rapor, yapay zeka destekli odak grup simülasyonu 
+analizi sonucu oluşturulmuştur.
+        """
+        
+        timestamp_file = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f'uzman_arastirmaci_analizi_{timestamp_file}.txt'
+        
+        st.download_button(
+            label="📋 Araştırma Raporu TXT İndir",
+            data=report_text,
+            file_name=filename,
+            mime='text/plain',
+            key="download_expert_txt"
+        )
+        
+        st.success("✅ Metin raporu hazır!")
+        
+    except Exception as e:
+        st.error(f"Metin raporu oluşturma hatası: {str(e)}")
+
+def display_analysis_tab():
+    st.markdown("### 📊 Analiz")
+    if st.button("📊 Analiz Et"):
+        st.info("Analiz oluşturuluyor...")
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             analysis = loop.run_until_complete(simulator.generate_analysis())
-            st.session_state.analysis_result = analysis
-            
-            st.success("✅ Analiz başarıyla oluşturuldu!")
-            st.rerun()
-            
+            st.session_state['analysis_result'] = analysis
+            st.markdown(analysis)
+            st.success("Analiz tamamlandı.")
         except Exception as e:
             st.error(f"Analiz oluşturma hatası: {str(e)}")
         finally:
@@ -1082,160 +1170,8 @@ def generate_analysis():
                 loop.close()
             except:
                 pass
-
-def display_general_analysis():
-    """Display general analysis summary"""
-    if st.session_state.analysis_result:
-        st.markdown('<div class="success-card">', unsafe_allow_html=True)
-        st.markdown(st.session_state.analysis_result)
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        st.info("Henüz analiz oluşturulmadı")
-
-def display_persona_analysis():
-    """Display individual persona analysis"""
-    if not simulator.discussion_log:
-        return
-    
-    # Count messages per persona
-    message_counts = {}
-    word_counts = {}
-    
-    for entry in simulator.discussion_log:
-        speaker = entry['speaker']
-        if speaker != 'Moderatör':
-            message_counts[speaker] = message_counts.get(speaker, 0) + 1
-            word_counts[speaker] = word_counts.get(speaker, 0) + len(entry['message'].split())
-    
-    # Display persona cards
-    if message_counts:
-        cols = st.columns(min(len(message_counts), 3))
-        
-        for idx, (persona, count) in enumerate(message_counts.items()):
-            col_idx = idx % len(cols)
-            
-            with cols[col_idx]:
-                avg_words = word_counts.get(persona, 0) / count if count > 0 else 0
-                
-                st.markdown(f"""
-                <div class="info-card">
-                    <h4>{persona}</h4>
-                    <div class="stat-item">
-                        <span class="stat-label">Mesaj Sayısı:</span>
-                        <span class="stat-value">{count}</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Toplam Kelime:</span>
-                        <span class="stat-value">{word_counts.get(persona, 0)}</span>
-                    </div>
-                    <div class="stat-item">
-                        <span class="stat-label">Ortalama Kelime:</span>
-                        <span class="stat-value">{avg_words:.1f}</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-def display_interaction_analysis():
-    """Display interaction analysis"""
-    if not simulator.discussion_log:
-        return
-    
-    st.markdown("#### 🗣️ Konuşma Sırası ve Etkileşim")
-    
-    # Create conversation flow
-    conversation_flow = []
-    for i, entry in enumerate(simulator.discussion_log):
-        if entry['speaker'] != 'Moderatör':
-            conversation_flow.append({
-                'order': i + 1,
-                'speaker': entry['speaker'],
-                'timestamp': entry['timestamp'],
-                'message_length': len(entry['message'])
-            })
-    
-    if conversation_flow:
-        # Display as timeline
-        for item in conversation_flow[-10:]:  # Last 10 interactions
-            timestamp = item['timestamp'].strftime("%H:%M:%S")
-            st.markdown(f"""
-            <div class="message-container persona-message">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <strong>{item['speaker']}</strong>
-                    <div>
-                        <span style="background: rgba(102, 126, 234, 0.1); padding: 0.25rem 0.5rem; border-radius: 10px; margin-right: 0.5rem;">
-                            {item['message_length']} kelime
-                        </span>
-                        <span style="color: #718096; font-size: 0.875rem;">{timestamp}</span>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-def display_statistics():
-    """Display detailed statistics"""
-    if not simulator.discussion_log:
-        return
-    
-    # Calculate statistics
-    total_messages = len(simulator.discussion_log)
-    moderator_messages = len([entry for entry in simulator.discussion_log if entry['speaker'] == 'Moderatör'])
-    persona_messages = total_messages - moderator_messages
-    
-    # Time analysis
-    if len(simulator.discussion_log) > 1:
-        start_time = simulator.discussion_log[0]['timestamp']
-        end_time = simulator.discussion_log[-1]['timestamp']
-        duration = end_time - start_time
-        duration_minutes = duration.total_seconds() / 60
-    else:
-        duration_minutes = 0
-    
-    # Word analysis
-    total_words = sum(len(entry['message'].split()) for entry in simulator.discussion_log)
-    avg_words_per_message = total_words / total_messages if total_messages > 0 else 0
-    
-    # Display stats grid
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Toplam Mesaj", total_messages)
-        st.metric("Persona Mesajları", persona_messages)
-    
-    with col2:
-        st.metric("Moderatör Mesajları", moderator_messages)
-        st.metric("Süre (dk)", f"{duration_minutes:.1f}")
-    
-    with col3:
-        st.metric("Toplam Kelime", total_words)
-        st.metric("Ort. Kelime/Mesaj", f"{avg_words_per_message:.1f}")
-    
-    with col4:
-        participation_rate = (persona_messages / total_messages * 100) if total_messages > 0 else 0
-        st.metric("Katılım Oranı", f"{participation_rate:.1f}%")
-        
-        if simulator.personas:
-            avg_messages_per_persona = persona_messages / len(simulator.personas)
-            st.metric("Ort. Mesaj/Persona", f"{avg_messages_per_persona:.1f}")
-
-def display_quick_stats():
-    """Display quick statistics overview"""
-    if not simulator.discussion_log:
-        return
-    
-    st.markdown("### ⚡ Hızlı İstatistikler")
-    
-    # Recent activity
-    recent_messages = simulator.discussion_log[-5:] if len(simulator.discussion_log) >= 5 else simulator.discussion_log
-    
-    if recent_messages:
-        st.markdown("#### 📱 Son Aktivite")
-        for entry in reversed(recent_messages):
-            timestamp = format_message_time(entry['timestamp'])
-            speaker = entry['speaker']
-            message_preview = entry['message'][:50] + "..." if len(entry['message']) > 50 else entry['message']
-            
-            icon = "🎙️" if speaker == "Moderatör" else "👤"
-            st.markdown(f"{icon} **{speaker}** _{timestamp}_ - {message_preview}")
+    elif st.session_state.get('analysis_result'):
+        st.markdown(st.session_state['analysis_result'])
 
 def display_report_tab():
     """Display report tab content"""
