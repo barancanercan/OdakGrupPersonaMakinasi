@@ -32,4 +32,7 @@ venv/
 *.pdf
 
 # Log files
-*.log 
+*.log
+
+# Streamlit config
+.streamlit/ 
