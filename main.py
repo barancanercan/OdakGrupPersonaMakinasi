@@ -7,13 +7,26 @@ from typing import Dict, List, Optional
 import pandas as pd
 from dataclasses import dataclass, asdict
 import google.generativeai as genai
-from camel.agents import ChatAgent
-from camel.messages import BaseMessage
-from camel.types import RoleType
 from dotenv import load_dotenv
 import re
 import time
 import base64
+
+# Streamlit import - deployment için
+try:
+    import streamlit as st
+except ImportError:
+    st = None
+
+# CAMEL imports - deployment için kontrol
+try:
+    from camel.agents import ChatAgent
+    from camel.messages import BaseMessage
+    from camel.types import RoleType
+    CAMEL_AVAILABLE = True
+except ImportError:
+    CAMEL_AVAILABLE = False
+    logging.warning("CAMEL-AI not available. Some features may be limited.")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +35,43 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 mcp_logs = []
+
+def get_api_key():
+    """API anahtarını güvenli şekilde al"""
+    # Streamlit secrets öncelikli
+    if st and hasattr(st, 'secrets') and 'GEMINI_API_KEY' in st.secrets:
+        return st.secrets['GEMINI_API_KEY']
+    # Environment variable fallback
+    return os.getenv('GEMINI_API_KEY')
+
+def get_api_key_2():
+    """İkinci API anahtarını güvenli şekilde al"""
+    if st and hasattr(st, 'secrets') and 'GEMINI_API_KEY_2' in st.secrets:
+        return st.secrets['GEMINI_API_KEY_2']
+    return os.getenv('GEMINI_API_KEY_2')
+
+def check_required_files():
+    """Deployment için gerekli dosyaları kontrol et"""
+    required_files = [
+        'personas/elif.json',
+        'personas/hatice_teyze.json',
+        'personas/kenan_bey.json',
+        'personas/tugrul_bey.json'
+    ]
+    
+    missing_files = []
+    for file_path in required_files:
+        if not os.path.exists(file_path):
+            missing_files.append(file_path)
+    
+    if missing_files:
+        logger.error(f"Eksik dosyalar: {missing_files}")
+        if st:
+            st.error(f"❌ Eksik dosyalar: {missing_files}")
+            st.info("📁 Lütfen şu klasörlerin var olduğundan emin olun: personas/, personas_pp/")
+            st.stop()
+        return False
+    return True
 
 @dataclass
 class Persona:
@@ -35,39 +85,65 @@ class Persona:
     modelProvider: str = None
     clients: list = None
     profile_pic: str = None
-    role: str = None  # Personanın rolü (örn: "Pazarlama Müdürü", "Müşteri Temsilcisi")
-    personality: str = None  # Personanın kişilik özellikleri
+    role: str = None
+    personality: str = None
 
     @classmethod
     def from_json(cls, json_file: str):
-        with open(json_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        try:
+            with open(json_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            logger.error(f"Persona dosyası bulunamadı: {json_file}")
+            raise
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parse hatası {json_file}: {e}")
+            raise
+            
         name = data.get('name')
-        # Profil fotoğrafı dosya adını oluştur (küçük harf, boşluk ve özel karakter temizliği)
+        if not name:
+            raise ValueError(f"Persona adı eksik: {json_file}")
+            
+        # Profil fotoğrafı dosya adını oluştur
         safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', name.lower().replace(' ', '_'))
-        # jpg ve png için kontrol et
+        
+        # Türkçe karakter dönüşümü
+        char_map = {'ç':'c', 'ğ':'g', 'ı':'i', 'ö':'o', 'ş':'s', 'ü':'u'}
+        ascii_name = safe_name
+        for tr_char, en_char in char_map.items():
+            ascii_name = ascii_name.replace(tr_char, en_char)
+        
         base_path = 'personas_pp/'
-        pic_path_jpg = f"{base_path}{safe_name}.jpg"
-        pic_path_png = f"{base_path}{safe_name}.png"
-        if os.path.exists(pic_path_jpg):
-            profile_pic = pic_path_jpg
-        elif os.path.exists(pic_path_png):
-            profile_pic = pic_path_png
-        else:
-            profile_pic = None
+        profile_pic = None
+        
+        # Önce orijinal isimle dene
+        for ext in ['.jpg', '.png', '.jpeg']:
+            pic_path = f"{base_path}{safe_name}{ext}"
+            if os.path.exists(pic_path):
+                profile_pic = pic_path
+                break
+        
+        # Bulamazsa ASCII versiyonla dene
+        if not profile_pic:
+            for ext in ['.jpg', '.png', '.jpeg']:
+                pic_path = f"{base_path}{ascii_name}{ext}"
+                if os.path.exists(pic_path):
+                    profile_pic = pic_path
+                    break
+        
         return cls(
             name=name,
-            bio=data.get('bio'),
-            lore=data.get('lore'),
-            knowledge=data.get('knowledge'),
-            topics=data.get('topics'),
-            style=data.get('style'),
-            adjectives=data.get('adjectives'),
+            bio=data.get('bio', []),
+            lore=data.get('lore', []),
+            knowledge=data.get('knowledge', []),
+            topics=data.get('topics', []),
+            style=data.get('style', {}),
+            adjectives=data.get('adjectives', []),
             modelProvider=data.get('modelProvider'),
             clients=data.get('clients'),
             profile_pic=profile_pic,
-            role=data.get('role', 'Katılımcı'),  # Varsayılan rol
-            personality=data.get('personality', 'Nötr')  # Varsayılan kişilik
+            role=data.get('role', 'Katılımcı'),
+            personality=data.get('personality', 'Nötr')
         )
 
 @dataclass
@@ -81,43 +157,59 @@ class AgendaItem:
 
 class LLMClient:
     def __init__(self):
-        self.api_key = os.getenv('GEMINI_API_KEY')
-        self.api_key_2 = os.getenv('GEMINI_API_KEY_2')
+        self.api_key = get_api_key()
+        self.api_key_2 = get_api_key_2()
+        
+        if not self.api_key:
+            error_msg = "🔑 GEMINI_API_KEY bulunamadı!"
+            logger.error(error_msg)
+            if st:
+                st.error(error_msg)
+                st.info("📝 API anahtarını Streamlit secrets veya .env dosyasında tanımlayın")
+            raise ValueError("API key not found")
+            
         self.current_api_key = self.api_key
         self.last_switch_time = time.time()
-        self.switch_interval = 30  # 30 saniyede bir API anahtarını değiştir
-        self.retry_delay = 15  # 429 hatası alındığında beklenecek süre (saniye)
-        self.max_retries = 3  # Maksimum deneme sayısı
-        self.request_count = 0  # İstek sayacı
-        self.last_request_time = time.time()  # Son istek zamanı
-        self.min_request_interval = 4  # İstekler arası minimum süre (saniye)
-        self.request_log = []  # İstek logları
+        self.switch_interval = 30
+        self.retry_delay = 15
+        self.max_retries = 3
+        self.request_count = 0
+        self.last_request_time = time.time()
+        self.min_request_interval = 4
+        self.request_log = []
 
     def _switch_api_key(self):
         """API anahtarları arasında geçiş yapar"""
+        if not self.api_key_2:
+            return
+            
         current_time = time.time()
         if current_time - self.last_switch_time >= self.switch_interval:
             self.current_api_key = self.api_key_2 if self.current_api_key == self.api_key else self.api_key
             self.last_switch_time = current_time
-            logger.info(f"API anahtarı değiştirildi: {self.current_api_key[:10]}...")
-            self.request_count = 0  # Anahtar değiştiğinde sayacı sıfırla
+            logger.info(f"API anahtarı değiştirildi")
+            self.request_count = 0
 
     def _log_request(self, success: bool, error: str = None):
         """İstek loglarını tutar"""
         log_entry = {
             'timestamp': datetime.now(),
-            'api_key': self.current_api_key[:10] + '...',
+            'api_key': self.current_api_key[:10] + '...' if self.current_api_key else 'None',
             'request_count': self.request_count,
             'success': success,
             'error': error
         }
         self.request_log.append(log_entry)
+        
         # Son 100 logu tut
         if len(self.request_log) > 100:
             self.request_log = self.request_log[-100:]
 
     async def call_llm(self, prompt: str, max_retries: int = 3) -> str:
         """Call the LLM with retry logic and API key switching"""
+        if not self.current_api_key:
+            return "API anahtarı bulunamadı."
+            
         for attempt in range(max_retries):
             try:
                 # İstekler arası minimum süre kontrolü
@@ -128,7 +220,7 @@ class LLMClient:
                     logger.info(f"İstekler arası bekleme: {wait_time:.1f} saniye")
                     await asyncio.sleep(wait_time)
 
-                self._switch_api_key()  # Her çağrıda API anahtarını kontrol et
+                self._switch_api_key()
                 self.request_count += 1
                 self.last_request_time = time.time()
                 
@@ -161,17 +253,25 @@ class LLMClient:
                 logger.error(f"LLM call failed: {error_msg}")
                 self._log_request(success=False, error=error_msg)
                 
-                if "429" in error_msg:  # Rate limit hatası
-                    if attempt < max_retries - 1:  # Son deneme değilse bekle
-                        wait_time = self.retry_delay
-                        logger.warning(f"Rate limit aşıldı. {wait_time} saniye bekleniyor... (Deneme {attempt + 1}/{max_retries})")
+                if "429" in error_msg or "quota" in error_msg.lower():
+                    if attempt < max_retries - 1:
+                        wait_time = self.retry_delay * (attempt + 1)
+                        logger.warning(f"Rate limit aşıldı. {wait_time} saniye bekleniyor...")
+                        if st:
+                            st.warning(f"⏳ API kotası doldu, {wait_time} saniye bekleniyor...")
                         await asyncio.sleep(wait_time)
                         continue
                 
-                if attempt == max_retries - 1:  # Son deneme
+                if "network" in error_msg.lower() or "connection" in error_msg.lower():
+                    if st:
+                        st.error("🌐 İnternet bağlantısı sorunu")
+                
+                if attempt == max_retries - 1:
+                    if st:
+                        st.error("❌ LLM servisine ulaşılamıyor")
                     return "Üzgünüm, şu anda yanıt veremiyorum. Lütfen daha sonra tekrar deneyin."
                 
-                await asyncio.sleep(1)  # Diğer hatalar için kısa bekleme
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
 
     def get_request_stats(self) -> dict:
         """İstek istatistiklerini döndürür"""
@@ -223,10 +323,16 @@ Yorumlar: {item.comments}
         response = await self.llm_client.call_llm(prompt)
         try:
             # Extract the first number from the response
-            score = float(re.search(r'\d+', response).group())
-            return min(max(score, 1), 10)  # Ensure score is between 1-10
-        except:
-            return 5.0  # Default score if parsing fails
+            score_match = re.search(r'\d+', response)
+            if score_match:
+                score = float(score_match.group())
+                return min(max(score, 1), 10)
+            else:
+                logger.warning(f"Score parsing failed for response: {response}")
+                return 5.0
+        except Exception as e:
+            logger.error(f"Score parsing error: {e}")
+            return 5.0
     
     async def validate_response(self, persona: Persona, context: str, response_draft: str) -> str:
         """Validate and improve persona response for consistency"""
@@ -261,8 +367,7 @@ Sıfatlar: {persona.adjectives}
         mcp_logs.append(log_entry)
         if self.simulator is not None and hasattr(self.simulator, 'mcp_logs'):
             self.simulator.mcp_logs.append(log_entry)
-        validated_response = response.strip()
-        return validated_response
+        return response.strip()
 
     async def summarize_for_persona(self, persona, agenda_item, score):
         prompt = f"""[SİSTEM MESAJI]
@@ -297,7 +402,12 @@ Yorumlar: {agenda_item.comments}
             self.simulator.mcp_logs.append(log_entry)
         return response.strip()
 
-class FocusGroupAgent(ChatAgent):
+# CAMEL-AI kullanılamıyorsa basit bir agent sınıfı
+class SimpleChatAgent:
+    def __init__(self, system_message):
+        self.system_message = system_message
+
+class FocusGroupAgent:
     def __init__(self, persona: Persona, llm_client: LLMClient, mcp_agent: MCPThinkingAgent):
         self.persona = persona
         self.llm_client = llm_client
@@ -305,10 +415,19 @@ class FocusGroupAgent(ChatAgent):
         self.conversation_history = []
         
         # Create system message for persona
-        system_message = self._create_system_message()
-        super().__init__(system_message)
+        self.system_message = self._create_system_message()
+        
+        # CAMEL-AI varsa kullan, yoksa basit versiyona geç
+        if CAMEL_AVAILABLE:
+            try:
+                from camel.agents import ChatAgent
+                from camel.messages import BaseMessage
+                # CAMEL agent'ı başlatmaya çalış
+                pass
+            except Exception as e:
+                logger.warning(f"CAMEL agent başlatılamadı: {e}")
     
-    def _create_system_message(self) -> BaseMessage:
+    def _create_system_message(self) -> str:
         content = f"""[SİSTEM MESAJI]
 Sen {self.persona.name} adlı personasın. Sana ait tüm kişisel bilgiler, geçmiş, bilgi alanları, konuşma tarzı ve sıfatlar aşağıda verilmiştir. Odak grup tartışmasında, bu karakterine tamamen uygun bir şekilde hareket etmeli ve konuşmalısın.
 
@@ -329,26 +448,20 @@ Sıfatlar: {self.persona.adjectives}
 5. Yanıtların doğal ve gerçekçi olmalı, yapay zeka tarafından üretildiği anlaşılmamalıdır.
 6. Sadece personanın söyleyeceği sözleri yaz. Açıklama veya meta-yorum yapma.
 """
-        return BaseMessage.make_assistant_message(role_name=self.persona.name, content=content)
+        return content
     
     async def generate_response(self, context: str, agenda_item: AgendaItem) -> str:
         """Generate persona response with MCP validation"""
         # Persona'nın bu haber için belleğindeki özeti kullan
-        from main import simulator
-        memory_key = (self.persona.name, agenda_item.title)
-        memory_summary = simulator.memory.get(memory_key, None)
+        try:
+            from main import simulator
+            memory_key = (self.persona.name, agenda_item.title)
+            memory_summary = simulator.memory.get(memory_key, None)
+        except:
+            memory_summary = None
+            
         if memory_summary:
-            prompt = f"""[SİSTEM MESAJI]
-Sen {self.persona.name} adlı personasın. Sana ait tüm kişisel bilgiler, geçmiş, bilgi alanları, konuşma tarzı ve sıfatlar aşağıda verilmiştir. Odak grup tartışmasında, bu karakterine tamamen uygun bir şekilde hareket etmeli ve konuşmalısın.
-
-[PERSONA PROFİLİ]
-İsim: {self.persona.name}
-Biyo: {self.persona.bio}
-Geçmiş: {self.persona.lore}
-Bilgi: {self.persona.knowledge}
-Konular: {self.persona.topics}
-Stil: {self.persona.style}
-Sıfatlar: {self.persona.adjectives}
+            prompt = f"""{self.system_message}
 
 [TARTIŞMA BAĞLAMI]
 {context}
@@ -365,7 +478,12 @@ Sıfatlar: {self.persona.adjectives}
 """
         else:
             # Bellek yoksa eski davranış
-            prompt = self._create_system_message().content + f"\n[TARTIŞMA BAĞLAMI]\n{context}\nŞu anki gündem maddesi: {agenda_item.title} - {agenda_item.content}"
+            prompt = f"""{self.system_message}
+
+[TARTIŞMA BAĞLAMI]
+{context}
+Şu anki gündem maddesi: {agenda_item.title} - {agenda_item.content}
+"""
         
         response = await self.llm_client.call_llm(prompt)
         return response.strip()
@@ -446,24 +564,33 @@ Raporunu akademik ve objektif bir dille yaz. Analizlerini somut örneklerle dest
 
 class FocusGroupSimulator:
     def __init__(self):
-        self.llm_client = LLMClient()
-        self.mcp_agent = MCPThinkingAgent(self.llm_client, self)
-        self.moderator = ModeratorAgent(self.llm_client)
-        self.overseer = OverseerAgent(self.llm_client)
-        
-        self.personas: List[Persona] = []
-        self.agents: List[FocusGroupAgent] = []
-        self.agenda_items: List[AgendaItem] = []
-        self.discussion_log = []
-        self.is_running = False
-        self.memory = {}
-        self.mcp_logs = []
-        
-        # Load personas
-        self.load_personas()
-        
-        # Create necessary directories
-        os.makedirs("personas_pp", exist_ok=True)
+        try:
+            self.llm_client = LLMClient()
+            self.mcp_agent = MCPThinkingAgent(self.llm_client, self)
+            self.moderator = ModeratorAgent(self.llm_client)
+            self.overseer = OverseerAgent(self.llm_client)
+            
+            self.personas: List[Persona] = []
+            self.agents: List[FocusGroupAgent] = []
+            self.agenda_items: List[AgendaItem] = []
+            self.discussion_log = []
+            self.is_running = False
+            self.memory = {}
+            self.mcp_logs = []
+            
+            # Create necessary directories
+            os.makedirs("personas", exist_ok=True)
+            os.makedirs("personas_pp", exist_ok=True)
+            os.makedirs("data", exist_ok=True)
+            
+            # Load personas if files exist
+            self.load_personas()
+            
+        except Exception as e:
+            logger.error(f"Simulator initialization failed: {e}")
+            if st:
+                st.error(f"❌ Simulator başlatılamadı: {e}")
+            raise
     
     def load_personas(self):
         """Load personas from JSON files"""
@@ -474,6 +601,7 @@ class FocusGroupSimulator:
             'personas/tugrul_bey.json'
         ]
         
+        loaded_count = 0
         for file_path in persona_files:
             if os.path.exists(file_path):
                 try:
@@ -481,120 +609,243 @@ class FocusGroupSimulator:
                     self.personas.append(persona)
                     agent = FocusGroupAgent(persona, self.llm_client, self.mcp_agent)
                     self.agents.append(agent)
+                    loaded_count += 1
                     logger.info(f"Loaded persona: {persona.name}")
                 except Exception as e:
                     logger.error(f"Failed to load persona from {file_path}: {e}")
+                    if st:
+                        st.warning(f"⚠️ {file_path} yüklenemedi: {e}")
+            else:
+                logger.warning(f"Persona dosyası bulunamadı: {file_path}")
+                
+        if loaded_count == 0:
+            logger.warning("Hiç persona yüklenemedi!")
+            if st:
+                st.warning("⚠️ Hiç persona dosyası bulunamadı. personas/ klasörünü kontrol edin.")
+        else:
+            logger.info(f"{loaded_count} persona başarıyla yüklendi")
     
     def load_agenda_data(self, file_path: str):
-        """Load agenda data from CSV/Excel"""
+        """Load agenda data from CSV/Excel with improved error handling"""
         try:
             # Dosya var mı kontrol et
             if not os.path.exists(file_path):
                 logger.error(f"File not found: {file_path}")
+                if st:
+                    st.error(f"📁 Dosya bulunamadı: {file_path}")
                 return False
 
             # Dosya formatını kontrol et ve oku
-            if file_path.endswith('.csv'):
-                df = pd.read_csv(file_path)
-            elif file_path.endswith(('.xlsx', '.xls')):
+            file_extension = os.path.splitext(file_path)[1].lower()
+            
+            if file_extension == '.csv':
+                try:
+                    df = pd.read_csv(file_path, encoding='utf-8')
+                except UnicodeDecodeError:
+                    try:
+                        df = pd.read_csv(file_path, encoding='latin-1')
+                    except:
+                        df = pd.read_csv(file_path, encoding='cp1254')
+            elif file_extension in ['.xlsx', '.xls']:
                 df = pd.read_excel(file_path)
             else:
-                logger.error(f"Unsupported file format: {file_path}")
+                logger.error(f"Unsupported file format: {file_extension}")
+                if st:
+                    st.error(f"❌ Desteklenmeyen dosya formatı: {file_extension}")
                 return False
 
-            # Gerekli sütunları kontrol et
+            if df.empty:
+                logger.error("File is empty")
+                if st:
+                    st.error("📄 Dosya boş!")
+                return False
+
+            # Sütun adlarını temizle (boşlukları kaldır)
+            df.columns = df.columns.str.strip()
+            
+            # Gerekli sütunları kontrol et (büyük/küçük harf duyarsız)
             required_columns = ['TYPE', 'LINK', 'TITLE', 'CONTENT', 'COMMENTS']
-            missing_columns = [col for col in required_columns if col not in df.columns]
+            df_columns_upper = [col.upper() for col in df.columns]
+            
+            missing_columns = []
+            column_mapping = {}
+            
+            for req_col in required_columns:
+                found = False
+                for i, df_col in enumerate(df_columns_upper):
+                    if req_col == df_col:
+                        column_mapping[req_col] = df.columns[i]
+                        found = True
+                        break
+                if not found:
+                    missing_columns.append(req_col)
+            
             if missing_columns:
                 logger.error(f"Missing required columns: {missing_columns}")
+                if st:
+                    st.error(f"❌ Eksik sütunlar: {missing_columns}")
+                    st.info(f"📋 Mevcut sütunlar: {list(df.columns)}")
+                    st.info(f"🔍 Gerekli sütunlar: {required_columns}")
                 return False
 
             # Verileri yükle
             self.agenda_items = []
-            for _, row in df.iterrows():
-                item = AgendaItem(
-                    type=str(row.get('TYPE', '')),
-                    link=str(row.get('LINK', '')),
-                    title=str(row.get('TITLE', '')),
-                    content=str(row.get('CONTENT', '')),
-                    comments=str(row.get('COMMENTS', ''))
-                )
-                self.agenda_items.append(item)
+            loaded_items = 0
+            
+            for index, row in df.iterrows():
+                try:
+                    # Boş satırları atla
+                    if pd.isna(row[column_mapping['TITLE']]) or str(row[column_mapping['TITLE']]).strip() == '':
+                        continue
+                        
+                    item = AgendaItem(
+                        type=str(row.get(column_mapping['TYPE'], '')),
+                        link=str(row.get(column_mapping['LINK'], '')),
+                        title=str(row.get(column_mapping['TITLE'], '')),
+                        content=str(row.get(column_mapping['CONTENT'], '')),
+                        comments=str(row.get(column_mapping['COMMENTS'], ''))
+                    )
+                    self.agenda_items.append(item)
+                    loaded_items += 1
+                except Exception as e:
+                    logger.warning(f"Satır {index + 1} atlandı: {e}")
+                    continue
 
-            if not self.agenda_items:
-                logger.error("No valid agenda items found in file")
+            if loaded_items == 0:
+                logger.error("No valid agenda items found")
+                if st:
+                    st.error("📋 Geçerli gündem maddesi bulunamadı!")
                 return False
 
-            logger.info(f"Successfully loaded {len(self.agenda_items)} agenda items")
+            logger.info(f"Successfully loaded {loaded_items} agenda items")
+            if st:
+                st.success(f"✅ {loaded_items} gündem maddesi başarıyla yüklendi!")
             return True
 
         except Exception as e:
             logger.error(f"Failed to load agenda data: {str(e)}")
+            if st:
+                st.error(f"❌ Gündem yükleme hatası: {str(e)}")
             return False
     
     async def score_agenda_items(self):
-        """Score all agenda items for all personas"""
+        """Score all agenda items for all personas with progress tracking"""
+        if not self.agenda_items or not self.personas:
+            return
+            
+        total_operations = len(self.agenda_items) * len(self.personas)
+        completed_operations = 0
+        
+        if st:
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+        
         for item in self.agenda_items:
             scores = []
             for persona in self.personas:
-                score = await self.mcp_agent.score_agenda_item(persona, item)
-                scores.append(score)
-                summary = await self.mcp_agent.summarize_for_persona(persona, item, score)
-                self.memory[(persona.name, item.title)] = summary
-            item.score = sum(scores) / len(scores)  # Average score
+                try:
+                    if st:
+                        status_text.text(f"🎯 {persona.name} için {item.title} puanlanıyor...")
+                    
+                    score = await self.mcp_agent.score_agenda_item(persona, item)
+                    scores.append(score)
+                    
+                    summary = await self.mcp_agent.summarize_for_persona(persona, item, score)
+                    self.memory[(persona.name, item.title)] = summary
+                    
+                    completed_operations += 1
+                    if st:
+                        progress_bar.progress(completed_operations / total_operations)
+                        
+                except Exception as e:
+                    logger.error(f"Error scoring {item.title} for {persona.name}: {e}")
+                    scores.append(5.0)  # Default score
+                    completed_operations += 1
+                    if st:
+                        progress_bar.progress(completed_operations / total_operations)
+            
+            item.score = sum(scores) / len(scores) if scores else 0.0
+        
+        if st:
+            status_text.text("✅ Puanlama tamamlandı!")
+            progress_bar.empty()
+            status_text.empty()
     
     async def start_simulation(self, max_rounds=10):
-        """Start the focus group simulation"""
+        """Start the focus group simulation with improved error handling"""
         if not self.agenda_items:
-            raise ValueError("No agenda items loaded")
+            raise ValueError("Gündem maddeleri yüklenmemiş!")
         
+        if not self.personas:
+            raise ValueError("Hiç persona yüklenmemiş!")
+            
         self.is_running = True
         self.discussion_log = []
         round_count = 0
         
-        while self.is_running and round_count < max_rounds:
-            for agenda_item in self.agenda_items:
-                if not self.is_running:
-                    break
-                
-                # Moderatör girişi
-                first_persona = self.personas[0].name if self.personas else "katılımcı"
-                moderator_intro = await self.moderator.start_discussion(agenda_item, first_persona)
-                self.discussion_log.append({
-                    'timestamp': datetime.now(),
-                    'speaker': 'Moderatör',
-                    'message': moderator_intro
-                })
-                await asyncio.sleep(2)
-                
-                # Her persona konuşsun
-                for i, agent in enumerate(self.agents):
+        try:
+            while self.is_running and round_count < max_rounds:
+                for agenda_item in self.agenda_items:
                     if not self.is_running:
                         break
                     
-                    context = self._build_context()
-                    response = await agent.generate_response(context, agenda_item)
-                    self.discussion_log.append({
-                        'timestamp': datetime.now(),
-                        'speaker': agent.persona.name,
-                        'message': response
-                    })
-                    await asyncio.sleep(3)
-                    
-                    # Moderatör sıradaki kişiye söz versin (sonuncu hariç)
-                    if i < len(self.agents) - 1:
-                        next_persona = self.agents[i + 1].persona.name
-                        moderator_transition = await self.moderator.give_turn(
-                            agent.persona.name, next_persona
-                        )
+                    # Moderatör girişi
+                    first_persona = self.personas[0].name if self.personas else "katılımcı"
+                    try:
+                        moderator_intro = await self.moderator.start_discussion(agenda_item, first_persona)
                         self.discussion_log.append({
                             'timestamp': datetime.now(),
                             'speaker': 'Moderatör',
-                            'message': moderator_transition
+                            'message': moderator_intro
                         })
                         await asyncio.sleep(2)
-            
-            round_count += 1
+                    except Exception as e:
+                        logger.error(f"Moderator intro failed: {e}")
+                        continue
+                    
+                    # Her persona konuşsun
+                    for i, agent in enumerate(self.agents):
+                        if not self.is_running:
+                            break
+                        
+                        try:
+                            context = self._build_context()
+                            response = await agent.generate_response(context, agenda_item)
+                            self.discussion_log.append({
+                                'timestamp': datetime.now(),
+                                'speaker': agent.persona.name,
+                                'message': response
+                            })
+                            await asyncio.sleep(3)
+                            
+                            # Moderatör sıradaki kişiye söz versin (sonuncu hariç)
+                            if i < len(self.agents) - 1:
+                                next_persona = self.agents[i + 1].persona.name
+                                moderator_transition = await self.moderator.give_turn(
+                                    agent.persona.name, next_persona
+                                )
+                                self.discussion_log.append({
+                                    'timestamp': datetime.now(),
+                                    'speaker': 'Moderatör',
+                                    'message': moderator_transition
+                                })
+                                await asyncio.sleep(2)
+                        except Exception as e:
+                            logger.error(f"Agent response failed for {agent.persona.name}: {e}")
+                            # Hata durumunda varsayılan yanıt ekle
+                            self.discussion_log.append({
+                                'timestamp': datetime.now(),
+                                'speaker': agent.persona.name,
+                                'message': f"Özür dilerim, şu anda fikrimi ifade edemiyorum."
+                            })
+                
+                round_count += 1
+        except Exception as e:
+            logger.error(f"Simulation error: {e}")
+            self.is_running = False
+            raise
+        finally:
+            self.is_running = False
         
         return self.discussion_log
     
@@ -608,12 +859,23 @@ class FocusGroupSimulator:
     def stop_simulation(self):
         """Stop the simulation"""
         self.is_running = False
+        logger.info("Simulation stopped by user")
     
     async def generate_analysis(self) -> str:
         """Generate final analysis report"""
+        if not self.discussion_log:
+            return "Analiz edilecek tartışma bulunamadı."
+            
         full_discussion = self._build_full_discussion()
-        analysis = await self.overseer.analyze_discussion(full_discussion)
-        return analysis
+        if not full_discussion.strip():
+            return "Boş tartışma - analiz edilecek içerik yok."
+            
+        try:
+            analysis = await self.overseer.analyze_discussion(full_discussion)
+            return analysis
+        except Exception as e:
+            logger.error(f"Analysis generation failed: {e}")
+            return f"Analiz oluşturulurken hata oluştu: {str(e)}"
     
     def _build_full_discussion(self) -> str:
         """Build complete discussion text"""
@@ -623,5 +885,18 @@ class FocusGroupSimulator:
             discussion_parts.append(f"[{timestamp}] {entry['speaker']}: {entry['message']}")
         return "\n".join(discussion_parts)
 
-# Global simulator instance
-simulator = FocusGroupSimulator()
+# Global simulator instance with error handling
+try:
+    simulator = FocusGroupSimulator()
+    logger.info("Simulator initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize simulator: {e}")
+    simulator = None
+
+if __name__ == "__main__":
+    print("main.py loaded successfully")
+    print(f"Simulator available: {simulator is not None}")
+    if simulator:
+        print(f"Personas loaded: {len(simulator.personas)}")
+    else:
+        print("Simulator initialization failed - check API keys and dependencies")
