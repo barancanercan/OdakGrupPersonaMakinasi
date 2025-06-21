@@ -64,10 +64,7 @@ def load_css():
     }
     
     .main-header {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: #e2e8f0 !important;
         text-align: center;
         font-size: 3rem !important;
         font-weight: 800 !important;
@@ -98,66 +95,6 @@ def load_css():
         box-shadow: none !important;
     }
     
-    .chat-container {
-        background: rgba(15, 23, 42, 0.95);
-        border-radius: 20px;
-        padding: 2rem;
-        margin: 2rem 0;
-        height: 600px;
-        overflow-y: auto;
-        border: 1px solid rgba(100, 116, 139, 0.3);
-        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
-    }
-    
-    .chat-message {
-        display: flex;
-        align-items: flex-start;
-        margin: 1.5rem 0;
-        animation: messageSlideIn 0.5s ease-out;
-    }
-    
-    .chat-avatar {
-        width: 45px;
-        height: 45px;
-        border-radius: 50%;
-        margin-right: 1rem;
-        border: 2px solid #6366f1;
-        object-fit: cover;
-    }
-    
-    .chat-bubble {
-        background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
-        border: 1px solid rgba(99, 102, 241, 0.3);
-        border-radius: 18px;
-        padding: 1rem 1.5rem;
-        max-width: 70%;
-    }
-    
-    .chat-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 0.5rem;
-    }
-    
-    .chat-speaker {
-        font-weight: 600;
-        color: #f1f5f9;
-    }
-    
-    .chat-time {
-        font-size: 0.75rem;
-        color: #94a3b8;
-        background: rgba(100, 116, 139, 0.2);
-        padding: 0.2rem 0.6rem;
-        border-radius: 10px;
-    }
-    
-    .chat-content {
-        color: #e2e8f0;
-        line-height: 1.6;
-    }
-    
     .success-card {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
         color: #f0fdf4 !important;
@@ -180,17 +117,6 @@ def load_css():
         border-radius: 12px !important;
         padding: 1rem !important;
         margin: 1rem 0 !important;
-    }
-    
-    @keyframes messageSlideIn {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
     }
     
     #MainMenu {visibility: hidden;}
@@ -462,16 +388,32 @@ def display_simulation_tab():
     col_duration, col_spacer = st.columns([2, 2])
     
     with col_duration:
-        discussion_duration = st.slider(
-            "🕒 Tartışma Süresi (dakika)", 
-            min_value=5, 
-            max_value=60, 
-            value=15,
-            step=5,
-            help="Tartışmanın ne kadar süreceğini belirleyin (5-60 dakika arası)"
-        )
-        st.session_state['discussion_duration'] = discussion_duration
-        st.info(f"Seçilen süre: {discussion_duration} dakika (~{discussion_duration//5} tur tartışma)")
+        col_slider, col_input = st.columns([2, 1])
+        
+        with col_slider:
+            discussion_duration = st.slider(
+                "🕒 Tartışma Süresi (dakika)", 
+                min_value=5, 
+                max_value=30, 
+                value=st.session_state.get('discussion_duration', 15),
+                step=5,
+                help="Tartışmanın ne kadar süreceğini belirleyin"
+            )
+        
+        with col_input:
+            custom_duration = st.number_input(
+                "Manuel Giriş", 
+                min_value=1, 
+                max_value=120, 
+                value=discussion_duration,
+                step=1,
+                help="Özel süre girin (1-120 dakika)"
+            )
+            
+        # Use custom input if it differs from slider
+        final_duration = custom_duration if custom_duration != discussion_duration else discussion_duration
+        st.session_state['discussion_duration'] = final_duration
+        st.info(f"Seçilen süre: {final_duration} dakika (~{final_duration//5} tur tartışma)")
     
     button_col1, button_col2, button_col3 = st.columns(3)
     
