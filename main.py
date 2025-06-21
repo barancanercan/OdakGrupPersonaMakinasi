@@ -5,15 +5,11 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
 import pandas as pd
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 import google.generativeai as genai
-from camel.agents import ChatAgent
-from camel.messages import BaseMessage
-from camel.types import RoleType
 from dotenv import load_dotenv
 import re
 import time
-import base64
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -231,40 +227,6 @@ Yorumlar: {item.comments}
         except:
             return 5.0
 
-    async def validate_response(self, persona: Persona, context: str, response_draft: str) -> str:
-        prompt = f"""[SİSTEM MESAJI]
-Sen bir "Karakter Tutarlılık Kontrolörü"sün. Sana bir persona profili, mevcut tartışma bağlamı ve personanın olası bir yanıt taslağı verilecektir. Bu taslağın personanın karakterine, tarzına ve önceki yorumlarına tam olarak uygun olup olmadığını değerlendir. Gerektiğinde taslağı iyileştirerek daha tutarlı bir yanıt oluştur.
-
-[PERSONA PROFİLİ]
-İsim: {persona.name}
-Biyo: {persona.bio}
-Geçmiş: {persona.lore}
-Bilgi: {persona.knowledge}
-Konular: {persona.topics}
-Stil: {persona.style}
-Sıfatlar: {persona.adjectives}
-
-[TARTIŞMA BAĞLAMI]
-{context}
-
-[PERSONANIN Olası YANITI (TASLAK)]
-{response_draft}
-
-[TALİMATLAR]
-1. Personanın "bio", "lore", "knowledge", "topics", "style" ve "adjectives" alanlarını referans alarak, taslağın bu özelliklere uygunluğunu değerlendir.
-2. Taslak, personanın mevcut bilgi birikimi veya görüşleriyle çelişiyor mu?
-3. Taslak, personanın tanımlanmış konuşma tarzına ("all", "chat", "post") ve sıfatlarına uygun mu?
-4. Taslak, tartışmanın genel akışına ve mantığına uygun mu?
-5. Eğer taslak tutarlı ve uygunsa, taslağı olduğu gibi tekrar et.
-6. Eğer taslak tutarsızsa veya geliştirilmesi gerekiyorsa, personanın karakterine tam olarak uygun, mantıklı ve bağlamla uyumlu yeni bir yanıt oluştur. Yanıt, sadece personanın söyleyeceği sözler olmalıdır, başka bir açıklama veya ekleme yapma.
-"""
-        response = await self.llm_client.call_llm(prompt)
-        log_entry = {"type": "validate", "prompt": prompt, "response": response}
-        mcp_logs.append(log_entry)
-        if self.simulator is not None and hasattr(self.simulator, 'mcp_logs'):
-            self.simulator.mcp_logs.append(log_entry)
-        return response.strip()
-
     async def summarize_for_persona(self, persona, agenda_item, score):
         prompt = f"""[SİSTEM MESAJI]
 Sen bir "Hatırlama Uzmanı"sın. Sana bir persona profili, bir haber ve bu personanın haberi okuma dikkat seviyesi (1-10) verilecek. Lütfen, bu persona bu haberi bu dikkat seviyesiyle okusa, neleri hatırlar, neleri unutur, hangi ana fikri aklında tutar, özetle. Yanıtın sadece persona'nın aklında kalanlar olsun.
@@ -298,41 +260,14 @@ Yorumlar: {agenda_item.comments}
             self.simulator.mcp_logs.append(log_entry)
         return response.strip()
 
-class FocusGroupAgent(ChatAgent):
+class FocusGroupAgent:
     def __init__(self, persona: Persona, llm_client: LLMClient, mcp_agent: MCPThinkingAgent):
         self.persona = persona
         self.llm_client = llm_client
         self.mcp_agent = mcp_agent
         self.conversation_history = []
-        
-        system_message = self._create_system_message()
-        super().__init__(system_message)
-    
-    def _create_system_message(self) -> BaseMessage:
-        content = f"""[SİSTEM MESAJI]
-Sen {self.persona.name} adlı personasın. Sana ait tüm kişisel bilgiler, geçmiş, bilgi alanları, konuşma tarzı ve sıfatlar aşağıda verilmiştir. Odak grup tartışmasında, bu karakterine tamamen uygun bir şekilde hareket etmeli ve konuşmalısın.
-
-[PERSONA PROFİLİ]
-İsim: {self.persona.name}
-Biyo: {self.persona.bio}
-Geçmiş: {self.persona.lore}
-Bilgi: {self.persona.knowledge}
-Konular: {self.persona.topics}
-Stil: {self.persona.style}
-Sıfatlar: {self.persona.adjectives}
-
-[TALİMATLAR]
-1. "bio", "lore", "knowledge", "topics", "style" ve "adjectives" alanlarını her yanıtında içselleştir.
-2. Yanıtların, personanın yaşından, eğitiminden, sosyo-ekonomik durumundan ve inançlarından etkilenmiş olmalıdır.
-3. "style" (all, chat, post) ve "adjectives" özelliklerini konuşma tarzına ve kelime seçimine yansıt.
-4. Gündem maddesine ve diğer personaların yorumlarına, kendi personanın bakış açısıyla tepki ver.
-5. Yanıtların doğal ve gerçekçi olmalı, yapay zeka tarafından üretildiği anlaşılmamalıdır.
-6. Sadece personanın söyleyeceği sözleri yaz. Açıklama veya meta-yorum yapma.
-"""
-        return BaseMessage.make_assistant_message(role_name=self.persona.name, content=content)
     
     async def generate_response(self, context: str, agenda_item: AgendaItem) -> str:
-        memory_key = (self.persona.name, agenda_item.title)
         memory_summary = agenda_item.persona_memories.get(self.persona.name, None)
         
         if memory_summary:
@@ -362,7 +297,30 @@ Sıfatlar: {self.persona.adjectives}
 7. Sadece personanın söyleyeceği sözleri yaz. Açıklama veya meta-yorum yapma.
 """
         else:
-            prompt = self._create_system_message().content + f"\n[TARTIŞMA BAĞLAMI]\n{context}\nŞu anki gündem maddesi: {agenda_item.title} - {agenda_item.content}"
+            prompt = f"""[SİSTEM MESAJI]
+Sen {self.persona.name} adlı personasın. Sana ait tüm kişisel bilgiler, geçmiş, bilgi alanları, konuşma tarzı ve sıfatlar aşağıda verilmiştir. Odak grup tartışmasında, bu karakterine tamamen uygun bir şekilde hareket etmeli ve konuşmalısın.
+
+[PERSONA PROFİLİ]
+İsim: {self.persona.name}
+Biyo: {self.persona.bio}
+Geçmiş: {self.persona.lore}
+Bilgi: {self.persona.knowledge}
+Konular: {self.persona.topics}
+Stil: {self.persona.style}
+Sıfatlar: {self.persona.adjectives}
+
+[TARTIŞMA BAĞLAMI]
+{context}
+Şu anki gündem maddesi: {agenda_item.title} - {agenda_item.content}
+
+[TALİMATLAR]
+1. "bio", "lore", "knowledge", "topics", "style" ve "adjectives" alanlarını her yanıtında içselleştir.
+2. Yanıtların, personanın yaşından, eğitiminden, sosyo-ekonomik durumundan ve inançlarından etkilenmiş olmalıdır.
+3. "style" ve "adjectives" özelliklerini konuşma tarzına ve kelime seçimine yansıt.
+4. Gündem maddesine ve diğer personaların yorumlarına, kendi personanın bakış açısıyla tepki ver.
+5. Yanıtların doğal ve gerçekçi olmalı, yapay zeka tarafından üretildiği anlaşılmamalıdır.
+6. Sadece personanın söyleyeceği sözleri yaz. Açıklama veya meta-yorum yapma.
+"""
         
         response = await self.llm_client.call_llm(prompt)
         return response.strip()
@@ -406,88 +364,80 @@ class OverseerAgent:
     def __init__(self, llm_client: LLMClient):
         self.llm_client = llm_client
     
-    async def analyze_discussion(self, full_discussion: str) -> str:
+    async def analyze_discussion(self, full_discussion: str, personas: List[Persona], agenda_items: List[AgendaItem]) -> str:
+        # Prepare persona info
+        persona_info = ""
+        if personas:
+            for persona in personas:
+                persona_info += f"- {persona.name}: {persona.role}, {persona.personality}\n"
+        
+        # Prepare agenda info
+        agenda_info = ""
+        if agenda_items:
+            for i, item in enumerate(agenda_items, 1):
+                agenda_info += f"{i}. {item.title}\n"
+        
         prompt = f"""[SİSTEM MESAJI]
 Sen "Prof. Dr. Araştırmacı" - sosyoloji ve siyaset bilimi alanında uzmanlaşmış bir akademisyensin. Sana bir odak grup tartışmasının tam transkripti verilecek. Bu tartışmayı derinlemesine analiz et.
-
 
 [KATILIMCILAR]
 {persona_info}
 
-
 [TARTIŞILAN KONULAR]
 {agenda_info}
-
 
 [TARTIŞMA TRANSKRİPTİ]
 {full_discussion}
 
-
 [ARAŞTIRMA RAPORU TALİMATLARI]
 Kapsamlı bir akademik analiz raporu hazırla:
 
-
 **1. YÖNETİCİ ÖZETİ**
 - Ana bulgular ve sonuçlar
-
 
 **2. KATILIMCI ANALİZİ**
 - Her katılımcının profil analizi
 - Konuşma tarzları ve karakteristik özellikleri
 - Grup içindeki rolleri
 
-
 **3. TARTIŞMA DİNAMİKLERİ**
 - Ana temalar ve tartışma noktaları
 - Katılımcılar arası etkileşimler
 - Anlaşmazlık ve uzlaşma alanları
-
 
 **4. SOSYOLOJİK BULGULAR**
 - Toplumsal sınıf, yaş, cinsiyet etkilerinin analizi
 - Kültürel ve sosyal kimlik etkileri
 - Grup dinamikleri
 
-
 **5. POLİTİK BOYUT ANALİZİ**
 - Siyasi eğilimler ve ideolojik konumlar
 - Polarizasyon seviyeleri
 - Demokratik tartışma kalitesi
-
 
 **6. SÖYLEM ANALİZİ**
 - Kullanılan dil ve retorik
 - İkna stratejileri
 - Duygusal ve rasyonel argümanlar
 
-
 **7. TÜRKİYEDEKİ KÜSKÜN-KARARSIZ SEÇMENİN SİYASİ VE SOSYOLOJİK DURUMU**
 - Türkiye'deki küskün-kararsız seçmenin önemli politik özellikleri
 - Türkiye'deki küskün-kararsız seçmenin önemli sosyolojik özellikleri
-- Türkiye'deki küskün-kararsız seçmenin lideler arasında ki değişimi ve aktif popüler liderleri ve sebepleri
+- Türkiye'deki küskün-kararsiz seçmenin liderlere bakişi ve aktif popüler liderleri
 
+**8. STRATEJİK ÖNERİLER**
+- Küskün-kararsız seçmenin algı değişimi
+- Aktif liderlerin bu seçmen kitlesini kazanma stratejileri
+- Bu personalara hitap eden gündem maddeleri önerileri
 
-**8. ÖNERİLEN STRATEJİ**
-- Türkiye'deki küskün-kararsız seçmenin lideler arasında ki algı değişimİ
-- Türkiye'deki küskün-kararsız seçmenin aktif popüler liderlerin bu seçmenlerdeki
-oy potansitelini kazanmak için nasıl bir politika izlemesi gerektiğini
-- Türkiye'deki küskün-kararsız seçmenin bu personalara hitap eden gündem maddeleri hakkında strate önerisi
-
-
-
-
-**8. SONUÇ VE ÖNERİLER**
+**9. SONUÇ VE ÖNERİLER**
 - Temel bulgular
 - Toplumsal çıkarımlar
 - Politik öneriler
 
-
 Objektif, bilimsel ve eleştirel bir yaklaşım sergile. Somut örneklerle destekle.
 """
-        analysis = await self.analyze_with_llm(prompt)
-        return analysis
-
-    async def analyze_with_llm(self, prompt):
+        
         analysis = await self.llm_client.call_llm(prompt)
         return analysis
 
@@ -570,7 +520,6 @@ class FocusGroupSimulator:
             logger.error(f"Failed to load agenda data: {str(e)}")
             return False
     
-    # Eksik metodları ekleyelim
     async def prepare_agenda_analysis(self):
         """Gündem maddelerini analiz et ve puanları hesapla"""
         await self.score_agenda_items()
@@ -600,7 +549,6 @@ class FocusGroupSimulator:
         self.discussion_log = []
         round_count = 0
         
-        # Import random here to avoid issues
         import random
         
         while self.is_running and round_count < max_rounds:
@@ -700,7 +648,7 @@ class FocusGroupSimulator:
     async def generate_analysis(self) -> str:
         """Generate final analysis report"""
         full_discussion = self._build_full_discussion()
-        analysis = await self.overseer.analyze_discussion(full_discussion)
+        analysis = await self.overseer.analyze_discussion(full_discussion, self.personas, self.agenda_items)
         return analysis
     
     def _build_full_discussion(self) -> str:
