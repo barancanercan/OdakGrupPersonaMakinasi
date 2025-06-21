@@ -227,22 +227,33 @@ def get_persona_pic(persona_name: str) -> Optional[str]:
     if not pp_dir.exists():
         return None
     
-    safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', persona_name.lower().replace(' ', '_'))
-    
-    # Specific mappings
+    # Specific mappings for all personas
     file_mappings = {
         'elif': 'elif.jpg',
+        'hatice teyze': 'hatice_teyze.jpg',
         'hatice_teyze': 'hatice_teyze.jpg',
+        'kenan bey': 'kenan_bey.jpg',
         'kenan_bey': 'kenan_bey.jpg',
+        'tuğrul bey': 'tugrul_bey.jpg',
+        'tugrul bey': 'tugrul_bey.jpg',
         'tugrul_bey': 'tugrul_bey.jpg'
     }
     
+    # Try direct mapping first
+    name_lower = persona_name.lower().strip()
+    if name_lower in file_mappings:
+        pic_path = pp_dir / file_mappings[name_lower]
+        if pic_path.exists():
+            return str(pic_path)
+    
+    # Try safe name conversion
+    safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', name_lower.replace(' ', '_'))
     if safe_name in file_mappings:
         pic_path = pp_dir / file_mappings[safe_name]
         if pic_path.exists():
             return str(pic_path)
     
-    # Fallback
+    # Fallback with extensions
     for ext in ['.jpg', '.png', '.jpeg']:
         pic_path = pp_dir / f"{safe_name}{ext}"
         if pic_path.exists():
