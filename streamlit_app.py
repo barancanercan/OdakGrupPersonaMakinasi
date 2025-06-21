@@ -1,4 +1,3 @@
-import streamlit as st
 import os
 import re
 import json
@@ -15,6 +14,7 @@ import random
 from typing import Dict, List, Optional
 import logging
 from pathlib import Path
+import streamlit as st
 
 # Import your main simulation components
 try:
@@ -56,6 +56,36 @@ def load_css():
         min-height: 100vh;
     }
     
+    /* Main container styling */
+    .main .block-container {
+        padding: 2rem 1rem;
+        max-width: 1400px;
+    }
+    
+    /* Header and text styling */
+    h1, h2, h3, h4, h5, h6 {
+        color: #f1f5f9 !important;
+        font-family: 'Inter', sans-serif !important;
+        font-weight: 700 !important;
+    }
+    
+    .main-header {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        text-align: center;
+        font-size: 3rem !important;
+        font-weight: 800 !important;
+        margin-bottom: 2rem !important;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+    }
+    
+    p, div, span, label {
+        color: #cbd5e1 !important;
+        font-family: 'Inter', sans-serif !important;
+    }
+    
     /* Button styling */
     .stButton > button {
         background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
@@ -64,21 +94,163 @@ def load_css():
         border-radius: 12px !important;
         padding: 0.75rem 2rem !important;
         font-weight: 600 !important;
+        font-size: 1rem !important;
+        font-family: 'Inter', sans-serif !important;
         transition: all 0.3s ease !important;
+        box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3) !important;
         width: 100% !important;
+        height: 3rem !important;
+    }
+    
+    .stButton > button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 12px 30px rgba(99, 102, 241, 0.4) !important;
+        background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%) !important;
     }
     
     .stButton > button:disabled {
         background: linear-gradient(135deg, #374151 0%, #4b5563 100%) !important;
         color: #6b7280 !important;
         border-color: #374151 !important;
+        transform: none !important;
+        box-shadow: none !important;
+        cursor: not-allowed !important;
+    }
+    
+    /* File uploader styling */
+    .stFileUploader {
+        border: 2px dashed #6366f1 !important;
+        border-radius: 15px !important;
+        padding: 2rem !important;
+        background: rgba(51, 65, 85, 0.5) !important;
+        text-align: center !important;
+        transition: all 0.3s ease !important;
+    }
+    
+    .stFileUploader:hover {
+        border-color: #8b5cf6 !important;
+        background: rgba(139, 92, 246, 0.1) !important;
+    }
+    
+    /* Chat container styling */
+    .chat-container {
+        background: rgba(15, 23, 42, 0.95);
+        border-radius: 20px;
+        padding: 2rem;
+        margin: 2rem 0;
+        height: 600px;
+        overflow-y: auto;
+        border: 1px solid rgba(100, 116, 139, 0.3);
+        box-shadow: 0 25px 50px rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(15px);
+    }
+    
+    .chat-message {
+        display: flex;
+        align-items: flex-start;
+        margin: 1.5rem 0;
+        animation: messageSlideIn 0.5s ease-out;
+    }
+    
+    .chat-message.moderator {
+        justify-content: center;
+    }
+    
+    .chat-message.persona {
+        justify-content: flex-start;
+    }
+    
+    .chat-avatar {
+        width: 45px;
+        height: 45px;
+        border-radius: 50%;
+        margin-right: 1rem;
+        border: 2px solid #6366f1;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        object-fit: cover;
+    }
+    
+    .chat-avatar.moderator {
+        border-color: #ec4899;
+    }
+    
+    .chat-bubble {
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+        border: 1px solid rgba(99, 102, 241, 0.3);
+        border-radius: 18px;
+        padding: 1rem 1.5rem;
+        max-width: 70%;
+        position: relative;
+        backdrop-filter: blur(10px);
+    }
+    
+    .chat-bubble.moderator {
+        background: linear-gradient(135deg, rgba(236, 72, 153, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+        border-color: rgba(236, 72, 153, 0.3);
+        text-align: center;
+        max-width: 90%;
+    }
+    
+    .chat-bubble::before {
+        content: '';
+        position: absolute;
+        top: 15px;
+        left: -8px;
+        width: 0;
+        height: 0;
+        border-top: 8px solid transparent;
+        border-bottom: 8px solid transparent;
+        border-right: 8px solid rgba(99, 102, 241, 0.3);
+    }
+    
+    .chat-bubble.moderator::before {
+        display: none;
+    }
+    
+    .chat-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+    
+    .chat-speaker {
+        font-weight: 600;
+        color: #f1f5f9;
+        font-size: 0.95rem;
+    }
+    
+    .chat-time {
+        font-size: 0.75rem;
+        color: #94a3b8;
+        background: rgba(100, 116, 139, 0.2);
+        padding: 0.2rem 0.6rem;
+        border-radius: 10px;
+    }
+    
+    .chat-content {
+        color: #e2e8f0;
+        line-height: 1.6;
+        font-size: 0.95rem;
+        word-wrap: break-word;
     }
     
     /* Status cards */
+    .status-card {
+        background: rgba(30, 41, 59, 0.8) !important;
+        border-radius: 15px !important;
+        padding: 1.5rem !important;
+        border: 1px solid rgba(100, 116, 139, 0.2) !important;
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3) !important;
+        backdrop-filter: blur(15px) !important;
+    }
+    
     .success-card {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
         color: #f0fdf4 !important;
+        border: 1px solid rgba(16, 185, 129, 0.3) !important;
         border-radius: 12px !important;
+        box-shadow: 0 8px 20px rgba(16, 185, 129, 0.2) !important;
         padding: 1rem !important;
         margin: 1rem 0 !important;
     }
@@ -86,7 +258,9 @@ def load_css():
     .error-card {
         background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
         color: #fef2f2 !important;
+        border: 1px solid rgba(239, 68, 68, 0.3) !important;
         border-radius: 12px !important;
+        box-shadow: 0 8px 20px rgba(239, 68, 68, 0.2) !important;
         padding: 1rem !important;
         margin: 1rem 0 !important;
     }
@@ -94,9 +268,127 @@ def load_css():
     .info-card {
         background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%) !important;
         color: #f0f9ff !important;
+        border: 1px solid rgba(14, 165, 233, 0.3) !important;
         border-radius: 12px !important;
+        box-shadow: 0 8px 20px rgba(14, 165, 233, 0.2) !important;
         padding: 1rem !important;
         margin: 1rem 0 !important;
+    }
+    
+    /* Conversation list styling */
+    .conversation-item {
+        background: rgba(30, 41, 59, 0.6);
+        border-radius: 12px;
+        padding: 1rem;
+        margin: 0.5rem 0;
+        border-left: 4px solid #6366f1;
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+    
+    .conversation-item:hover {
+        background: rgba(30, 41, 59, 0.8);
+        transform: translateX(5px);
+    }
+    
+    .conversation-item.moderator {
+        border-left-color: #ec4899;
+        background: rgba(236, 72, 153, 0.1);
+    }
+    
+    /* Streamlit-specific components */
+    .stSuccess {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+        color: #f0fdf4 !important;
+        border: 1px solid rgba(16, 185, 129, 0.3) !important;
+        border-radius: 12px !important;
+    }
+    
+    .stError {
+        background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+        color: #fef2f2 !important;
+        border: 1px solid rgba(239, 68, 68, 0.3) !important;
+        border-radius: 12px !important;
+    }
+    
+    .stInfo {
+        background: linear-gradient(135deg, #0ea5e9 0%, #3b82f6 100%) !important;
+        color: #f0f9ff !important;
+        border: 1px solid rgba(14, 165, 233, 0.3) !important;
+        border-radius: 12px !important;
+    }
+    
+    /* Custom scrollbar */
+    .chat-container::-webkit-scrollbar {
+        width: 8px;
+    }
+    
+    .chat-container::-webkit-scrollbar-track {
+        background: rgba(30, 41, 59, 0.5);
+        border-radius: 4px;
+    }
+    
+    .chat-container::-webkit-scrollbar-thumb {
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+        border-radius: 4px;
+    }
+    
+    .chat-container::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+    }
+    
+    /* Hide Streamlit elements */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* Animations */
+    @keyframes messageSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    /* Loading spinner */
+    .loading-spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(99, 102, 241, 0.3);
+        border-top: 3px solid #6366f1;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+    
+    /* Responsive design */
+    @media (max-width: 768px) {
+        .main-header {
+            font-size: 2rem !important;
+        }
+        
+        .chat-container {
+            height: 400px;
+            padding: 1rem;
+        }
+        
+        .chat-bubble {
+            max-width: 90%;
+        }
+        
+        .chat-avatar {
+            width: 35px;
+            height: 35px;
+        }
     }
     """
     
@@ -132,15 +424,42 @@ def get_persona_pic(persona_name: str) -> Optional[str]:
             return str(mod_path)
         else:
             return None
+    
     pp_dir = Path('personas_pp')
     if not pp_dir.exists():
         return None
+    
     safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', persona_name.lower().replace(' ', '_'))
+    
+    # Specific mappings for the files you mentioned
+    file_mappings = {
+        'elif': 'elif.jpg',
+        'hatice_teyze': 'hatice_teyze.jpg',  # Fixed from .kpg to .jpg
+        'kenan_bey': 'kenan_bey.jpg',
+        'tugrul_bey': 'tugrul_bey.jpg'
+    }
+    
+    if safe_name in file_mappings:
+        pic_path = pp_dir / file_mappings[safe_name]
+        if pic_path.exists():
+            return str(pic_path)
+    
+    # Fallback to original logic
     for ext in ['.jpg', '.png', '.jpeg']:
         pic_path = pp_dir / f"{safe_name}{ext}"
         if pic_path.exists():
             return str(pic_path)
+    
     return None
+
+def get_base64_from_file(file_path: str) -> str:
+    """Convert file to base64 string"""
+    try:
+        with open(file_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception as e:
+        logger.error(f"Error converting file to base64: {e}")
+        return ""
 
 def format_message_time(timestamp: datetime) -> str:
     """Format message timestamp"""
@@ -171,19 +490,129 @@ def clean_html_and_format_text(text):
         return ""
     
     text = str(text)
+    # HTML etiketlerini temizle
     text = re.sub(r'<[^>]+>', '', text)
+    # HTML entitilerini çöz
     text = html.unescape(text)
+    # Fazla boşlukları temizle
     text = ' '.join(text.split())
     text = text.strip()
     
     return text
+
+def display_modern_chat():
+    """Display modern chat interface"""
+    if not simulator.discussion_log:
+        st.markdown('<div class="info-card">💬 Henüz tartışma başlamadı...</div>', unsafe_allow_html=True)
+        return
+    
+    # Chat container with all messages
+    chat_html = """
+    <div class="chat-container">
+    """
+    
+    for entry in simulator.discussion_log:
+        timestamp = format_message_time(entry['timestamp'])
+        speaker = entry['speaker']
+        message = clean_html_and_format_text(entry['message'])
+        
+        if not message or message == '0':
+            continue
+        
+        is_moderator = speaker == 'Moderatör'
+        pic_path = get_persona_pic(speaker)
+        
+        # Prepare avatar
+        avatar_html = ""
+        if pic_path:
+            try:
+                base64_img = get_base64_from_file(pic_path)
+                avatar_html = f'<img src="data:image/jpeg;base64,{base64_img}" class="chat-avatar{"moderator" if is_moderator else ""}" alt="{speaker}">'
+            except:
+                avatar_html = f'<div class="chat-avatar{"moderator" if is_moderator else ""}" style="background: {"#ec4899" if is_moderator else "#6366f1"}; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">{speaker[0]}</div>'
+        else:
+            avatar_html = f'<div class="chat-avatar{"moderator" if is_moderator else ""}" style="background: {"#ec4899" if is_moderator else "#6366f1"}; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">{speaker[0]}</div>'
+        
+        # Create message HTML
+        chat_html += f"""
+        <div class="chat-message {"moderator" if is_moderator else "persona"}">
+            {avatar_html if not is_moderator else ""}
+            <div class="chat-bubble {"moderator" if is_moderator else ""}">
+                <div class="chat-header">
+                    <span class="chat-speaker">{speaker}</span>
+                    <span class="chat-time">{timestamp}</span>
+                </div>
+                <div class="chat-content">{html.escape(message)}</div>
+            </div>
+            {avatar_html if is_moderator else ""}
+        </div>
+        """
+    
+    chat_html += """
+    </div>
+    <script>
+        // Auto scroll to bottom
+        setTimeout(function() {
+            var chatContainer = document.querySelector('.chat-container');
+            if (chatContainer) {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }, 100);
+    </script>
+    """
+    
+    st.markdown(chat_html, unsafe_allow_html=True)
+
+def display_conversation_list():
+    """Display conversation in a list format for easier reading"""
+    if not simulator.discussion_log:
+        st.info("💬 Henüz tartışma başlamadı...")
+        return
+    
+    st.markdown("#### 📋 Konuşma Listesi")
+    
+    # Show conversation metrics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("💬 Toplam Mesaj", len(simulator.discussion_log))
+    with col2:
+        persona_messages = len([entry for entry in simulator.discussion_log if entry['speaker'] != 'Moderatör'])
+        st.metric("👥 Persona Mesajları", persona_messages)
+    with col3:
+        if simulator.discussion_log:
+            last_speaker = simulator.discussion_log[-1]['speaker']
+            st.metric("🎤 Son Konuşan", last_speaker)
+    
+    # Display all messages in expandable sections
+    for i, entry in enumerate(simulator.discussion_log):
+        timestamp = format_message_time(entry['timestamp'])
+        speaker = entry['speaker']
+        message = clean_html_and_format_text(entry['message'])
+        
+        if not message or message == '0':
+            continue
+        
+        is_moderator = speaker == 'Moderatör'
+        
+        # Create a unique key for each expander
+        with st.expander(f"{'🎤' if is_moderator else '👤'} {speaker} - {timestamp}", expanded=False):
+            # Show profile picture if available
+            pic_path = get_persona_pic(speaker)
+            if pic_path:
+                col1, col2 = st.columns([1, 4])
+                with col1:
+                    st.image(pic_path, width=80)
+                with col2:
+                    st.write(message)
+            else:
+                st.write(message)
 
 # Main app
 def main():
     initialize_session_state()
     
     # Header
-    st.title("🎯 Odak Grup Persona Makinası")
+    st.markdown('<h1 class="main-header">🎯 Odak Grup Persona Makinası</h1>', unsafe_allow_html=True)
     
     # Sidebar
     with st.sidebar:
@@ -219,15 +648,29 @@ def main():
                 st.metric("Başarısız", stats['failed_requests'])
     
     # Main content tabs
-    main_tabs = st.tabs(["🚀 Simülasyon", "📊 Analiz", "📄 Rapor"])
+    main_tabs = st.tabs(["🚀 Simülasyon", "💬 Chat Görünümü", "📋 Liste Görünümü", "📊 Analiz", "📄 Rapor"])
     
     with main_tabs[0]:
         display_simulation_tab()
     
     with main_tabs[1]:
-        display_analysis_tab()
+        st.markdown("### 💬 Modern Chat Görünümü")
+        display_modern_chat()
+        if SIMULATION_STATE['running']:
+            time.sleep(2)
+            st.rerun()
     
     with main_tabs[2]:
+        st.markdown("### 📋 Detaylı Liste Görünümü")
+        display_conversation_list()
+        if SIMULATION_STATE['running']:
+            time.sleep(3)
+            st.rerun()
+    
+    with main_tabs[3]:
+        display_analysis_tab()
+    
+    with main_tabs[4]:
         display_report_tab()
 
 def display_simulation_tab():
@@ -251,11 +694,13 @@ def display_simulation_tab():
     # File processing
     if uploaded_file is not None:
         try:
+            # Save file
             os.makedirs('data', exist_ok=True)
             file_path = f"data/{uploaded_file.name}"
             with open(file_path, 'wb') as f:
                 f.write(uploaded_file.getvalue())
             
+            # Load and validate data
             if uploaded_file.name.endswith('.csv'):
                 df = pd.read_csv(file_path)
             else:
@@ -266,7 +711,7 @@ def display_simulation_tab():
             if is_valid:
                 if simulator.load_agenda_data(file_path):
                     st.session_state.agenda_loaded = True
-                    st.success(f"✅ {len(simulator.agenda_items)} gündem maddesi başarıyla yüklendi!")
+                    st.markdown(f'<div class="success-card">✅ {len(simulator.agenda_items)} gündem maddesi başarıyla yüklendi!</div>', unsafe_allow_html=True)
                     
                     # Show preview
                     with st.expander("📋 Gündem Önizleme"):
@@ -275,12 +720,12 @@ def display_simulation_tab():
                             st.write(item.content[:200] + "..." if len(item.content) > 200 else item.content)
                             st.divider()
                 else:
-                    st.error("❌ Dosya yüklenemedi. Lütfen format kontrolü yapın.")
+                    st.markdown('<div class="error-card">❌ Dosya yüklenemedi. Lütfen format kontrolü yapın.</div>', unsafe_allow_html=True)
             else:
-                st.error(f"❌ {message}")
+                st.markdown(f'<div class="error-card">❌ {message}</div>', unsafe_allow_html=True)
                 
         except Exception as e:
-            st.error(f"❌ Dosya işleme hatası: {str(e)}")
+            st.markdown(f'<div class="error-card">❌ Dosya işleme hatası: {str(e)}</div>', unsafe_allow_html=True)
     
     # Control buttons
     st.markdown("### 🎮 Simülasyon Kontrolü")
@@ -305,6 +750,7 @@ def display_simulation_tab():
     with button_col1:
         start_enabled = st.session_state.agenda_loaded and not SIMULATION_STATE['running']
         if st.button("▶️ Simülasyonu Başlat", disabled=not start_enabled, key="start_btn"):
+            # API anahtarı kontrolü
             if not check_api_keys():
                 st.error("❌ API anahtarları bulunamadı! Lütfen .env dosyasında GEMINI_API_KEY tanımlayın.")
                 return
@@ -323,90 +769,6 @@ def display_simulation_tab():
     
     # Simulation status display
     display_simulation_status()
-    
-    # Conversation section
-    display_conversation_section()
-
-async def start_extended_simulation(duration_minutes, status_placeholder, progress_placeholder):
-    """Extended simulation with time-based control"""
-    start_time = time.time()
-    end_time = start_time + (duration_minutes * 60)
-    message_count = 0
-    
-    try:
-        await simulator.prepare_agenda_analysis()
-        
-        while time.time() < end_time and not SIMULATION_STATE['stop_requested']:
-            
-            for agenda_item in simulator.agenda_items:
-                if time.time() >= end_time or SIMULATION_STATE['stop_requested']:
-                    break
-                
-                # Moderator introduces topic
-                moderator_intro = f"Şimdi '{agenda_item.title}' konusunu tartışalım. Görüşlerinizi paylaşabilirsiniz."
-                simulator.discussion_log.append({
-                    'timestamp': datetime.now(),
-                    'speaker': 'Moderatör',
-                    'message': moderator_intro
-                })
-                message_count += 1
-                
-                # Update display
-                await update_simulation_display(start_time, end_time, message_count, status_placeholder, progress_placeholder)
-                await asyncio.sleep(2)
-                
-                # Each persona speaks once per topic
-                agents_copy = list(simulator.agents)
-                random.shuffle(agents_copy)
-                
-                for agent in agents_copy:
-                    if time.time() >= end_time or SIMULATION_STATE['stop_requested']:
-                        break
-                    
-                    # Generate response
-                    context = simulator._build_context()
-                    response = await agent.generate_response(context, agenda_item)
-                    
-                    simulator.discussion_log.append({
-                        'timestamp': datetime.now(),
-                        'speaker': agent.persona.name,
-                        'message': response
-                    })
-                    message_count += 1
-                    
-                    # Update display after each message
-                    await update_simulation_display(start_time, end_time, message_count, status_placeholder, progress_placeholder)
-                    
-                    await asyncio.sleep(3)
-                
-                await asyncio.sleep(2)
-        
-        # Final status
-        if SIMULATION_STATE['stop_requested']:
-            status_placeholder.success("⏹️ Simülasyon kullanıcı tarafından durduruldu")
-        else:
-            status_placeholder.success("✅ Simülasyon başarıyla tamamlandı!")
-        
-        progress_placeholder.progress(1.0)
-        
-    except Exception as e:
-        status_placeholder.error(f"❌ Simülasyon hatası: {str(e)}")
-        logger.error(f"Extended simulation error: {e}")
-
-async def update_simulation_display(start_time, end_time, message_count, status_placeholder, progress_placeholder):
-    """Update simulation display in real-time"""
-    current_time = time.time()
-    elapsed_time = current_time - start_time
-    total_duration = end_time - start_time
-    
-    # Update progress
-    progress = min(elapsed_time / total_duration, 1.0)
-    progress_percentage = 0.5 + (progress * 0.4)
-    progress_placeholder.progress(progress_percentage)
-    
-    # Update status
-    time_remaining = max(0, (end_time - current_time) / 60)
-    status_placeholder.info(f"💬 Tartışma devam ediyor... | Kalan süre: {time_remaining:.1f} dk | Mesaj: {message_count}")
 
 def start_simulation():
     """Start simulation synchronously"""
@@ -415,41 +777,91 @@ def start_simulation():
             st.error("❌ Gündem maddesi bulunamadı!")
             return
             
+        # Prepare and run simulation
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
+        # Step 1: Prepare agenda analysis
         status_placeholder = st.empty()
         progress_placeholder = st.empty()
         
-        status_placeholder.info("📊 Gündem analizi başlatılıyor...")
+        status_placeholder.markdown('<div class="info-card">📊 Gündem analizi başlatılıyor...</div>', unsafe_allow_html=True)
         progress_placeholder.progress(0.1)
         
         try:
             loop.run_until_complete(simulator.prepare_agenda_analysis())
-            status_placeholder.success("✅ Gündem analizi tamamlandı!")
+            status_placeholder.markdown('<div class="success-card">✅ Gündem analizi tamamlandı!</div>', unsafe_allow_html=True)
             progress_placeholder.progress(0.3)
             
+            # Show scores immediately
             if simulator.agenda_items and any(item.persona_scores for item in simulator.agenda_items):
                 st.markdown("#### 📊 Gündem Puanları Hesaplandı")
                 display_agenda_scores()
             
         except Exception as e:
-            status_placeholder.error(f"❌ Gündem analizi hatası: {str(e)}")
+            status_placeholder.markdown(f'<div class="error-card">❌ Gündem analizi hatası: {str(e)}</div>', unsafe_allow_html=True)
             SIMULATION_STATE['running'] = False
             return
         
-        status_placeholder.info("💬 Tartışma başlatılıyor...")
+        # Step 2: Start discussion
+        status_placeholder.markdown('<div class="info-card">💬 Tartışma başlatılıyor...</div>', unsafe_allow_html=True)
         progress_placeholder.progress(0.5)
         
-        discussion_duration_minutes = st.session_state.get('discussion_duration', 15)
-        
         try:
-            loop.run_until_complete(start_extended_simulation(discussion_duration_minutes, status_placeholder, progress_placeholder))
+            async def run_discussion():
+                discussion_duration_minutes = st.session_state.get('discussion_duration', 5)
+                start_time = time.time()
+                end_time = start_time + (discussion_duration_minutes * 60)  # Convert to seconds
+                
+                message_count = 0
+                
+                status_placeholder.markdown(f'<div class="info-card">💬 {discussion_duration_minutes} dakikalık tartışma başlatılıyor...</div>', unsafe_allow_html=True)
+                
+                async def on_new_message():
+                    nonlocal message_count
+                    message_count += 1
+                    
+                    # Calculate time-based progress
+                    current_time = time.time()
+                    elapsed_time = current_time - start_time
+                    progress = min(elapsed_time / (discussion_duration_minutes * 60), 1.0)
+                    progress_percentage = 0.5 + (progress * 0.4)
+                    progress_placeholder.progress(progress_percentage)
+                    
+                    # Update status with time remaining
+                    time_remaining = max(0, (end_time - current_time) / 60)
+                    status_placeholder.markdown(f'<div class="info-card">💬 Tartışma devam ediyor... Kalan süre: {time_remaining:.1f} dakika</div>', unsafe_allow_html=True)
+                    
+                    # Check time limit
+                    if current_time >= end_time:
+                        simulator.stop_simulation()
+                        return
+                    
+                    # Check stop condition
+                    if SIMULATION_STATE['stop_requested']:
+                        simulator.stop_simulation()
+                        return
+                        
+                    await asyncio.sleep(0.5)
+                
+                # Start simulation with extended time
+                await simulator.start_simulation(max_rounds=10, on_new_message=on_new_message)
+            
+            loop.run_until_complete(run_discussion())
+            
+            # Final status
+            if SIMULATION_STATE['stop_requested']:
+                status_placeholder.markdown('<div class="info-card">⏹️ Simülasyon kullanıcı tarafından durduruldu</div>', unsafe_allow_html=True)
+            else:
+                status_placeholder.markdown('<div class="success-card">✅ Simülasyon başarıyla tamamlandı!</div>', unsafe_allow_html=True)
+            
+            progress_placeholder.progress(1.0)
             
         except Exception as e:
-            status_placeholder.error(f"❌ Tartışma hatası: {str(e)}")
+            status_placeholder.markdown(f'<div class="error-card">❌ Tartışma hatası: {str(e)}</div>', unsafe_allow_html=True)
             logger.error(f"Discussion error: {e}")
         
+        # Final update
         if simulator.discussion_log:
             st.info(f"💬 Simülasyon tamamlandı. {len(simulator.discussion_log)} mesaj oluşturuldu.")
         
@@ -460,7 +872,7 @@ def start_simulation():
         SIMULATION_STATE['running'] = False
         st.error(f"Simülasyon genel hatası: {str(e)}")
         logger.error(f"General simulation error: {e}")
-            
+        
     finally:
         try:
             loop.close()
@@ -483,18 +895,13 @@ def display_simulation_status():
     if SIMULATION_STATE['running'] or simulator.discussion_log:
         st.markdown("### 📊 Simülasyon Durumu")
         
-        status_col1, status_col2 = st.columns(2)
+        # Status display
+        if SIMULATION_STATE['running']:
+            st.markdown('<div class="info-card">🔄 Simülasyon çalışıyor...</div>', unsafe_allow_html=True)
+        elif simulator.discussion_log:
+            st.markdown('<div class="success-card">✅ Simülasyon tamamlandı</div>', unsafe_allow_html=True)
         
-        with status_col1:
-            if SIMULATION_STATE['running']:
-                st.info("🔄 Simülasyon çalışıyor...")
-            elif simulator.discussion_log:
-                st.success("✅ Simülasyon tamamlandı")
-        
-        with status_col2:
-            if SIMULATION_STATE['running'] and simulator.discussion_log:
-                st.metric("Anlık Mesaj Sayısı", len(simulator.discussion_log))
-        
+        # Display scores if available
         if simulator.agenda_items and any(item.persona_scores for item in simulator.agenda_items):
             display_agenda_scores()
 
@@ -507,6 +914,7 @@ def display_agenda_scores():
             continue
             
         with st.expander(f"📝 {agenda_item.title}"):
+            # Scores section
             st.markdown("**🎯 İlgi Puanları:**")
             
             score_cols = st.columns(min(len(simulator.personas), 4))
@@ -516,71 +924,47 @@ def display_agenda_scores():
                     score = agenda_item.persona_scores.get(persona.name, "Hesaplanıyor...")
                     
                     if isinstance(score, (int, float)):
+                        # Color coding
                         if score >= 7:
-                            st.success(f"{persona.name}: {score}/10 🔥")
+                            color = "#10b981"
+                            icon = "🔥"
                         elif score >= 4:
-                            st.warning(f"{persona.name}: {score}/10 ⚡")
+                            color = "#f59e0b" 
+                            icon = "⚡"
                         else:
-                            st.error(f"{persona.name}: {score}/10 💤")
+                            color = "#ef4444"
+                            icon = "💤"
+                        
+                        st.markdown(f"""
+                        <div style="
+                            background: rgba(30, 41, 59, 0.8);
+                            border: 2px solid {color};
+                            text-align: center;
+                            padding: 1rem;
+                            border-radius: 12px;
+                            margin: 0.5rem 0;
+                        ">
+                            <div style='font-weight: bold; color: #e2e8f0; margin-bottom: 0.5rem;'>
+                                {persona.name}
+                            </div>
+                            <div style='font-size: 1.5rem; margin: 0.3rem 0;'>
+                                {icon}
+                            </div>
+                            <div style='font-size: 1.4rem; font-weight: bold; color: {color};'>
+                                {score}/10
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
                     else:
                         st.metric(persona.name, score)
             
+            # Memory summaries
             st.markdown("**🧠 Persona Belleklerinde Kalanlar:**")
             
             for persona in simulator.personas:
                 memory = agenda_item.persona_memories.get(persona.name)
                 if memory:
                     st.markdown(f"**{persona.name}:** {memory[:200]}{'...' if len(memory) > 200 else ''}")
-
-def display_conversation_section():
-    """Display conversation section at the bottom"""
-    if simulator.discussion_log:
-        st.markdown("---")
-        st.markdown("### 💬 Tartışma Konuşmaları")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("💬 Toplam Mesaj", len(simulator.discussion_log))
-        with col2:
-            persona_messages = len([entry for entry in simulator.discussion_log if entry['speaker'] != 'Moderatör'])
-            st.metric("👥 Persona Mesajları", persona_messages)
-        with col3:
-            if simulator.discussion_log:
-                last_speaker = simulator.discussion_log[-1]['speaker']
-                st.metric("🎤 Son Konuşan", last_speaker)
-        
-        # Show message count selector
-        col_selector, col_spacer = st.columns([2, 2])
-        with col_selector:
-            show_count = st.selectbox(
-                "Gösterilecek mesaj sayısı:",
-                options=[10, 20, 50, "Tümü"],
-                index=0,
-                key="message_display_count"
-            )
-        
-        st.markdown("#### 📝 Konuşma Detayları (En Son Mesajlar Üstte)")
-        
-        # Determine which messages to show
-        if show_count == "Tümü":
-            messages_to_show = list(reversed(simulator.discussion_log))
-        else:
-            messages_to_show = list(reversed(simulator.discussion_log[-show_count:]))
-        
-        # Show messages
-        for entry in messages_to_show:
-            timestamp = format_message_time(entry['timestamp'])
-            speaker = entry['speaker']
-            message = clean_html_and_format_text(entry['message'])
-            
-            if not message or message == '0':
-                continue
-            
-            is_moderator = speaker == 'Moderatör'
-            
-            with st.chat_message("assistant" if is_moderator else "user"):
-                st.markdown(f"**{speaker}** - {timestamp}")
-                st.write(message)
 
 def display_analysis_tab():
     """Display analysis tab with both basic and expert analysis"""
@@ -789,9 +1173,9 @@ def display_report_tab():
         st.markdown('<div class="info-card">ℹ️ Rapor oluşturmak için önce bir simülasyon çalıştırın</div>', unsafe_allow_html=True)
         return
     
-    # PDF creation function
-    def create_enhanced_pdf(conversation: List[Dict], analysis: str, personas: List) -> FPDF:
-        """Create enhanced PDF with Helvetica font"""
+    # Enhanced PDF creation function with complete conversation
+    def create_complete_pdf(conversation: List[Dict], analysis: str, personas: List) -> FPDF:
+        """Create complete PDF with all conversation data"""
         pdf = FPDF()
         pdf.add_page()
         pdf.set_auto_page_break(auto=True, margin=15)
@@ -800,12 +1184,13 @@ def display_report_tab():
         pdf.set_font('Helvetica', 'B', 16)
         
         # Title
-        pdf.cell(0, 15, 'Odak Grup Simulasyonu Raporu', new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
+        pdf.cell(0, 15, 'Odak Grup Simulasyonu - Tam Rapor', new_x=XPos.LMARGIN, new_y=YPos.NEXT, align='C')
         pdf.ln(10)
         
         # Date and info
         pdf.set_font('Helvetica', '', 12)
         pdf.cell(0, 8, f'Tarih: {datetime.now().strftime("%d.%m.%Y %H:%M")}', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 8, f'Toplam Mesaj Sayisi: {len(conversation)}', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
         
         # Participants
@@ -819,55 +1204,83 @@ def display_report_tab():
                 pdf.cell(0, 6, f'  * {name} ({role})', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(5)
         
-        # Discussion section
+        # Complete discussion section
         pdf.set_font('Helvetica', 'B', 14)
-        pdf.cell(0, 10, 'Tartisma Gecmisi:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 10, 'TAM TARTISMA GECMISI:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(5)
         
-        # Add conversation with cleaning
-        for entry in conversation:
+        # Add ALL conversation messages
+        for entry_num, entry in enumerate(conversation, 1):
             timestamp = format_message_time(entry['timestamp'])
             speaker = clean_text_for_pdf(entry['speaker'])
             message = clean_text_for_pdf(clean_html_and_format_text(str(entry['message'])))
             
-            # Truncate if too long
-            if len(message) > 200:
-                message = message[:200] + "..."
-            
-            # Speaker name
+            # Message number and speaker
             pdf.set_font('Helvetica', 'B', 10)
-            pdf.cell(0, 6, f"{speaker} [{timestamp}]", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(0, 6, f"[{entry_num}] {speaker} - {timestamp}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             
-            # Message content
+            # Message content - no truncation
             pdf.set_font('Helvetica', '', 9)
             try:
-                # Split message into lines to avoid width issues
-                max_chars_per_line = 80
-                lines = [message[i:i+max_chars_per_line] for i in range(0, len(message), max_chars_per_line)]
-                for line in lines:
-                    if line.strip():
-                        pdf.cell(0, 5, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-            except:
-                pdf.cell(0, 5, "Mesaj görüntülenemiyor", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                # Split message into lines
+                max_chars_per_line = 90
+                if len(message) > max_chars_per_line:
+                    # Split by words to avoid breaking words
+                    words = message.split()
+                    lines = []
+                    current_line = ""
+                    
+                    for word in words:
+                        if len(current_line + " " + word) <= max_chars_per_line:
+                            current_line += " " + word if current_line else word
+                        else:
+                            if current_line:
+                                lines.append(current_line)
+                            current_line = word
+                    
+                    if current_line:
+                        lines.append(current_line)
+                    
+                    for line in lines:
+                        if line.strip():
+                            pdf.cell(0, 5, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                else:
+                    pdf.cell(0, 5, message, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            except Exception as e:
+                pdf.cell(0, 5, f"Mesaj görüntülenemiyor: {str(e)}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             
-            pdf.ln(2)
+            pdf.ln(3)
         
-        # Analysis section
+        # Analysis section on new page
         if analysis:
             pdf.add_page()
             pdf.set_font('Helvetica', 'B', 14)
-            pdf.cell(0, 10, 'Analiz Raporu:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(0, 10, 'DETAYLI ANALIZ RAPORU:', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(5)
             
-            # Clean analysis
+            # Clean and add complete analysis
             analysis_clean = clean_text_for_pdf(clean_html_and_format_text(analysis))
             
-            # Split into manageable chunks
             pdf.set_font('Helvetica', '', 9)
-            max_chars_per_line = 80
-            lines = [analysis_clean[i:i+max_chars_per_line] for i in range(0, len(analysis_clean), max_chars_per_line)]
+            max_chars_per_line = 90
             
-            for line in lines[:100]:  # Limit to first 100 lines
+            # Split analysis into words and create lines
+            words = analysis_clean.split()
+            lines = []
+            current_line = ""
+            
+            for word in words:
+                if len(current_line + " " + word) <= max_chars_per_line:
+                    current_line += " " + word if current_line else word
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+            
+            if current_line:
+                lines.append(current_line)
+            
+            for line in lines:
                 if line.strip():
                     try:
                         pdf.cell(0, 4, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -893,37 +1306,115 @@ def display_report_tab():
         for tr_char, en_char in char_map.items():
             text = text.replace(tr_char, en_char)
         
-        # Remove problematic characters
-        text = ''.join(char for char in text if ord(char) < 128)
+        # Remove problematic characters but keep essential punctuation
+        text = ''.join(char for char in text if ord(char) < 128 or char in '.,!?;:()[]{}')
         
         return text
     
-    # Report generation
-    if st.button('📄 PDF Raporu Oluştur', key="generate_pdf"):
-        try:
-            with st.spinner("PDF oluşturuluyor..."):
-                analysis_text = st.session_state.get('analysis_result', '') or st.session_state.get('expert_analysis_result', '')
-                pdf = create_enhanced_pdf(simulator.discussion_log, analysis_text, simulator.personas)
-                
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmpfile:
-                    pdf.output(tmpfile.name)
+    # Download options
+    st.markdown("#### 📥 İndirme Seçenekleri")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button('📄 Tam PDF Raporu Oluştur', key="generate_complete_pdf"):
+            try:
+                with st.spinner("Tam PDF raporu oluşturuluyor..."):
+                    analysis_text = st.session_state.get('expert_analysis_result', '') or st.session_state.get('analysis_result', '')
+                    pdf = create_complete_pdf(simulator.discussion_log, analysis_text, simulator.personas)
                     
-                    with open(tmpfile.name, 'rb') as f:
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f'odak_grup_raporu_{timestamp}.pdf'
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmpfile:
+                        pdf.output(tmpfile.name)
                         
-                        st.download_button(
-                            label="📥 PDF İndir",
-                            data=f.read(),
-                            file_name=filename,
-                            mime='application/pdf',
-                            key="download_pdf"
-                        )
+                        with open(tmpfile.name, 'rb') as f:
+                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                            filename = f'odak_grup_tam_rapor_{timestamp}.pdf'
+                            
+                            st.download_button(
+                                label="📥 Tam PDF İndir",
+                                data=f.read(),
+                                file_name=filename,
+                                mime='application/pdf',
+                                key="download_complete_pdf"
+                            )
+                    
+                    st.success("✅ Tam PDF raporu hazır!")
+                    
+            except Exception as e:
+                st.error(f"PDF oluşturma hatası: {str(e)}")
+    
+    with col2:
+        if st.button('📊 JSON Export', key="export_json"):
+            try:
+                # Create complete JSON export
+                export_data = {
+                    "simulation_info": {
+                        "date": datetime.now().isoformat(),
+                        "total_messages": len(simulator.discussion_log),
+                        "participants": [{"name": p.name, "role": p.role, "personality": p.personality} for p in simulator.personas]
+                    },
+                    "agenda_items": [
+                        {
+                            "title": item.title,
+                            "content": item.content,
+                            "scores": item.persona_scores,
+                            "memories": item.persona_memories
+                        } for item in simulator.agenda_items
+                    ],
+                    "conversation": [
+                        {
+                            "timestamp": entry['timestamp'].isoformat(),
+                            "speaker": entry['speaker'],
+                            "message": clean_html_and_format_text(entry['message'])
+                        } for entry in simulator.discussion_log
+                    ],
+                    "analysis": {
+                        "basic": st.session_state.get('analysis_result', ''),
+                        "expert": st.session_state.get('expert_analysis_result', '')
+                    }
+                }
                 
-                st.success("✅ PDF raporu hazır!")
+                json_str = json.dumps(export_data, ensure_ascii=False, indent=2)
                 
-        except Exception as e:
-            st.error(f"PDF oluşturma hatası: {str(e)}")
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f'odak_grup_data_{timestamp}.json'
+                
+                st.download_button(
+                    label="📥 JSON İndir",
+                    data=json_str.encode('utf-8'),
+                    file_name=filename,
+                    mime='application/json',
+                    key="download_json"
+                )
+                
+                st.success("✅ JSON export hazır!")
+                
+            except Exception as e:
+                st.error(f"JSON export hatası: {str(e)}")
+    
+    # Show conversation statistics
+    if simulator.discussion_log:
+        st.markdown("#### 📊 Konuşma İstatistikleri")
+        
+        stats_col1, stats_col2, stats_col3, stats_col4 = st.columns(4)
+        
+        with stats_col1:
+            st.metric("💬 Toplam Mesaj", len(simulator.discussion_log))
+        
+        with stats_col2:
+            persona_msgs = len([m for m in simulator.discussion_log if m['speaker'] != 'Moderatör'])
+            st.metric("👥 Persona Mesajları", persona_msgs)
+        
+        with stats_col3:
+            moderator_msgs = len([m for m in simulator.discussion_log if m['speaker'] == 'Moderatör'])
+            st.metric("🎤 Moderatör Mesajları", moderator_msgs)
+        
+        with stats_col4:
+            if simulator.discussion_log:
+                start_time = simulator.discussion_log[0]['timestamp']
+                end_time = simulator.discussion_log[-1]['timestamp']
+                duration = end_time - start_time
+                st.metric("⏱️ Süre", f"{duration.seconds//60}:{duration.seconds%60:02d}")
 
 def reset_simulation():
     """Reset simulation state"""
