@@ -1,10 +1,8 @@
-# streamlit_app.py dosyasının EN BAŞI - Import bölümü
-
 import os
 import re
 import json
 import asyncio
-import pandas as pd
+import pandas as pd  # BU SATIRI EN BAŞA EKLE (GLOBAL SCOPE)
 import numpy as np
 from datetime import datetime
 import time
@@ -1440,9 +1438,6 @@ def main():
                     speaker_stats[speaker]['words'] += word_count
                     speaker_stats[speaker]['chars'] += len(message)
                 
-                # Tablo olarak göster
-                import pandas as pd
-                # Tablo olarak göster
                 try:
                     df_stats = pd.DataFrame.from_dict(speaker_stats, orient='index')
                     df_stats['avg_words'] = df_stats['words'] / df_stats['count']
@@ -1591,7 +1586,7 @@ Maksimum 500 kelime ile analiz et."""
                             'Karakter Sayısı': len(clean_html_and_format_text(entry['message']))
                         })
                     
-                    df_time = pd.DataFrame(time_analysis)
+                    df_time = pd.DataFrame(time_analysis)  
                     st.dataframe(df_time, use_container_width=True)
                 
                 # Konu analizi
