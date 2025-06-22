@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
 import pandas as pd
+import numpy as np
 from dataclasses import dataclass
 import google.generativeai as genai
 from dotenv import load_dotenv
