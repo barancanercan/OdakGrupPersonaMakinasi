@@ -42,6 +42,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# streamlit_app.py dosyasındaki load_css() fonksiyonunda şu değişikliği yap:
+
 def load_css():
     """Sadece gerekli CSS stilleri - Chat CSS'leri kaldırıldı"""
     css_content = """
@@ -65,15 +67,15 @@ def load_css():
     }
     
     .main-header {
-        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: #ffffff !important;  /* ESKİ GRADIENT YERİNE BEYAZ */
         text-align: center;
         font-size: 3rem !important;
         font-weight: 800 !important;
         margin-bottom: 2rem !important;
+        text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3); /* OKUNABILIRLK İÇİN GÖLGE EKLENDİ */
     }
+    
+    /* DİĞER CSS'LER AYNI KALACAK... */
     
     .stButton > button {
         background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
