@@ -1,8 +1,11 @@
+# streamlit_app.py dosyasının EN BAŞI - Import bölümü
+
 import os
 import re
 import json
 import asyncio
 import pandas as pd
+import numpy as np
 from datetime import datetime
 import time
 import base64
@@ -42,7 +45,7 @@ st.set_page_config(
 )
 
 def load_css():
-    """Modern CSS stilleri yükle"""
+    """Sadece gerekli CSS stilleri - Chat CSS'leri kaldırıldı"""
     css_content = """
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
     
@@ -64,7 +67,10 @@ def load_css():
     }
     
     .main-header {
-        color: #e2e8f0 !important;
+        background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
         text-align: center;
         font-size: 3rem !important;
         font-weight: 800 !important;
@@ -95,6 +101,20 @@ def load_css():
         box-shadow: none !important;
     }
     
+    /* Native chat message styling */
+    .stChatMessage {
+        background: rgba(15, 23, 42, 0.8) !important;
+        border: 1px solid rgba(99, 102, 241, 0.3) !important;
+        border-radius: 15px !important;
+        margin: 1rem 0 !important;
+    }
+    
+    /* Moderatör mesajları için özel renk */
+    .stChatMessage[data-testid="chat-message-Moderatör"] {
+        border-color: rgba(236, 72, 153, 0.5) !important;
+        background: rgba(236, 72, 153, 0.1) !important;
+    }
+    
     .success-card {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
         color: #f0fdf4 !important;
@@ -119,12 +139,14 @@ def load_css():
         margin: 1rem 0 !important;
     }
     
+    /* Hide Streamlit elements */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     """
     
     st.markdown(f"<style>{css_content}</style>", unsafe_allow_html=True)
+
 
 def initialize_session_state():
     """Initialize session state variables"""
@@ -140,50 +162,107 @@ def initialize_session_state():
         st.session_state.expert_analysis_result = ""
     if 'discussion_duration' not in st.session_state:
         st.session_state.discussion_duration = 15
+    if 'debug_mode' not in st.session_state:
+        st.session_state.debug_mode = False
+    
+    # YENİ EKLEMELER - Analiz ve Rapor için:
+    if 'basic_analysis_result' not in st.session_state:
+        st.session_state.basic_analysis_result = ""
+    if 'expert_analysis_result' not in st.session_state:
+        st.session_state.expert_analysis_result = ""
 
 def get_persona_pic(persona_name: str) -> Optional[str]:
-    """Get persona profile picture path"""
-    if persona_name.strip().lower() in ["moderatör", "moderator"]:
-        mod_path = Path('personas_pp/moderator.png')
-        if mod_path.exists():
-            return str(mod_path)
+    """Moderatör dahil tüm persona resimlerini bul"""
+    if not persona_name:
+        return None
+        
+    # Moderatör için özel kontrol - TÜM VARYASYONLAR
+    moderator_names = ["moderatör", "moderator", "mod"]
+    if persona_name.strip().lower() in moderator_names:
+        moderator_paths = [
+            '/home/baran/Desktop/OdakGrupMakinası/personas_pp/moderator.png',  # Tam yol
+            'personas_pp/moderator.png',
+            'personas_pp/moderator.jpg',
+            'personas_pp/moderatör.png',
+            'personas_pp/moderatör.jpg',
+            'personas_pp/mod.png',
+            'personas_pp/mod.jpg'
+        ]
+        
+        for path in moderator_paths:
+            if os.path.exists(path):
+                logger.info(f"Moderatör resmi bulundu: {path}")
+                return path
+        
+        logger.warning(f"Moderatör resmi bulunamadı. Aranan yollar: {moderator_paths}")
         return None
     
     pp_dir = Path('personas_pp')
     if not pp_dir.exists():
+        logger.warning(f"Personas_pp directory not found: {pp_dir}")
         return None
     
-    # Specific mappings for all personas
+    # Detaylı eşleştirme tablosu
     file_mappings = {
-        'elif': 'elif.jpg',
-        'hatice teyze': 'hatice_teyze.jpg',
-        'hatice_teyze': 'hatice_teyze.jpg',
-        'kenan bey': 'kenan_bey.jpg',
-        'kenan_bey': 'kenan_bey.jpg',
-        'tuğrul bey': 'tugrul_bey.jpg',
-        'tugrul bey': 'tugrul_bey.jpg',
-        'tugrul_bey': 'tugrul_bey.jpg'
+        # Elif için
+        'elif': ['elif.jpg', 'elif.png', 'elif.jpeg'],
+        
+        # Hatice Teyze için - tüm varyasyonlar
+        'hatice teyze': ['hatice_teyze.jpg', 'hatice_teyze.png', 'hatice_teyze.jpeg'],
+        'hatice_teyze': ['hatice_teyze.jpg', 'hatice_teyze.png', 'hatice_teyze.jpeg'],
+        'hatice': ['hatice_teyze.jpg', 'hatice_teyze.png', 'hatice_teyze.jpeg'],
+        
+        # Kenan Bey için - tüm varyasyonlar
+        'kenan bey': ['kenan_bey.jpg', 'kenan_bey.png', 'kenan_bey.jpeg'],
+        'kenan_bey': ['kenan_bey.jpg', 'kenan_bey.png', 'kenan_bey.jpeg'],
+        'kenan': ['kenan_bey.jpg', 'kenan_bey.png', 'kenan_bey.jpeg'],
+        
+        # Tuğrul Bey için - tüm varyasyonlar
+        'tuğrul bey': ['tugrul_bey.jpg', 'tugrul_bey.png', 'tugrul_bey.jpeg'],
+        'tugrul bey': ['tugrul_bey.jpg', 'tugrul_bey.png', 'tugrul_bey.jpeg'],
+        'tugrul_bey': ['tugrul_bey.jpg', 'tugrul_bey.png', 'tugrul_bey.jpeg'],
+        'tuğrul_bey': ['tugrul_bey.jpg', 'tugrul_bey.png', 'tugrul_bey.jpeg'],
+        'tugrul': ['tugrul_bey.jpg', 'tugrul_bey.png', 'tugrul_bey.jpeg'],
+        'tuğrul': ['tugrul_bey.jpg', 'tugrul_bey.png', 'tugrul_bey.jpeg']
     }
     
-    # Try direct mapping first
+    # İsmi normalize et
     name_lower = persona_name.lower().strip()
-    if name_lower in file_mappings:
-        pic_path = pp_dir / file_mappings[name_lower]
-        if pic_path.exists():
-            return str(pic_path)
     
-    # Try safe name conversion
+    # Direkt eşleştirme dene
+    if name_lower in file_mappings:
+        for filename in file_mappings[name_lower]:
+            pic_path = pp_dir / filename
+            if pic_path.exists():
+                logger.info(f"Persona resmi bulundu: {persona_name} -> {pic_path}")
+                return str(pic_path)
+    
+    # Güvenli isim dönüşümü ile dene
     safe_name = re.sub(r'[^a-zA-Z0-9_]', '_', name_lower.replace(' ', '_'))
     if safe_name in file_mappings:
-        pic_path = pp_dir / file_mappings[safe_name]
-        if pic_path.exists():
-            return str(pic_path)
+        for filename in file_mappings[safe_name]:
+            pic_path = pp_dir / filename
+            if pic_path.exists():
+                logger.info(f"Persona resmi bulundu (safe_name): {persona_name} -> {pic_path}")
+                return str(pic_path)
     
-    # Fallback with extensions
-    for ext in ['.jpg', '.png', '.jpeg']:
+    # Genel arama - tüm uzantıları dene
+    for ext in ['.jpg', '.png', '.jpeg', '.JPG', '.PNG', '.JPEG']:
+        # Orijinal isim ile
+        pic_path = pp_dir / f"{name_lower}{ext}"
+        if pic_path.exists():
+            logger.info(f"Persona resmi bulundu (extension): {persona_name} -> {pic_path}")
+            return str(pic_path)
+            
+        # Güvenli isim ile
         pic_path = pp_dir / f"{safe_name}{ext}"
         if pic_path.exists():
+            logger.info(f"Persona resmi bulundu (safe+ext): {persona_name} -> {pic_path}")
             return str(pic_path)
+    
+    # Hiçbir şey bulunamazsa
+    logger.warning(f"Persona resmi bulunamadı: {persona_name}")
+    logger.debug(f"Mevcut dosyalar: {list(pp_dir.glob('*')) if pp_dir.exists() else 'Directory yok'}")
     
     return None
 
@@ -220,75 +299,109 @@ def check_api_keys():
             simulator.llm_client.api_key.strip() != '')
 
 def clean_html_and_format_text(text):
-    """Clean HTML tags and format text properly"""
+    """Metin temizleme - Native chat için optimize edildi"""
     if not text:
         return ""
     
+    # String'e çevir
     text = str(text)
+    
+    # HTML taglerini kaldır
     text = re.sub(r'<[^>]+>', '', text)
+    
+    # HTML entity'lerini decode et
     text = html.unescape(text)
-    text = ' '.join(text.split())
+    
+    # Fazla boşlukları temizle
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Başlangıç ve bitiş boşluklarını kaldır
     text = text.strip()
+    
+    # Çok uzun metinleri kısalt (Streamlit chat için)
+    if len(text) > 800:
+        text = text[:797] + "..."
+    
+    # Boş string kontrolü
+    if not text or text == "0":
+        return ""
     
     return text
 
 def display_modern_chat():
-    """Display modern chat interface"""
+    """Native Streamlit chat - İsim ve moderatör resmi sorunları düzeltildi"""
     if not simulator.discussion_log:
-        st.markdown('<div class="info-card">💬 Henüz tartışma başlamadı...</div>', unsafe_allow_html=True)
+        st.info("💬 Henüz tartışma başlamadı...")
         return
     
-    chat_html = '<div class="chat-container">'
-    
-    for entry in simulator.discussion_log:
-        timestamp = format_message_time(entry['timestamp'])
-        speaker = entry['speaker']
-        message = clean_html_and_format_text(entry['message'])
+    # Sabit yükseklikli container
+    with st.container(height=600):
+        for entry in simulator.discussion_log:
+            speaker = entry['speaker']
+            message = clean_html_and_format_text(entry['message'])
+            timestamp = format_message_time(entry['timestamp'])
+            
+            # Boş mesajları atla
+            if not message or message == '0' or len(message.strip()) == 0:
+                continue
+            
+            # Moderatör kontrolü
+            is_moderator = speaker.lower().strip() == 'moderatör'
+            
+            # Avatar belirleme - HER DURUM İÇİN
+            avatar = None
+            
+            # Profil resmi ara - Moderatör dahil
+            pic_path = get_persona_pic(speaker)
+            if pic_path and os.path.exists(pic_path):
+                try:
+                    # Base64 encode
+                    with open(pic_path, "rb") as f:
+                        img_data = base64.b64encode(f.read()).decode()
+                    avatar = f"data:image/jpeg;base64,{img_data}"
+                    logger.info(f"Avatar yüklendi: {speaker} -> {pic_path}")
+                except Exception as e:
+                    logger.error(f"Avatar yükleme hatası ({speaker}): {e}")
+                    avatar = "🎤" if is_moderator else speaker[0].upper()
+            else:
+                # Resim yoksa emoji/harf
+                avatar = "🎤" if is_moderator else speaker[0].upper()
+                logger.warning(f"Avatar bulunamadı, varsayılan kullanılıyor: {speaker}")
+            
+            # Native Streamlit chat message kullan
+            with st.chat_message(speaker, avatar=avatar):
+                # İSİM VE MESAJ AYRI SATIRLARDA GÖSTER
+                
+                # 1. Konuşan kişinin ismi (büyük, kalın)
+                st.markdown(f"**🗣️ {speaker}**")
+                
+                # 2. Zaman damgası
+                st.caption(f"🕐 {timestamp}")
+                
+                # 3. Mesaj içeriği
+                st.markdown(f"💬 {message}")
+                
+                # 4. Moderatör için özel işaret
+                if is_moderator:
+                    st.markdown("---")
+                    st.markdown("*🎯 Moderatör Mesajı*")
+                
+                # 5. Debug bilgisi (geliştirme aşamasında)
+                if st.session_state.get('debug_mode', False):
+                    st.caption(f"Debug: speaker={speaker}, is_mod={is_moderator}, pic_path={pic_path}")
         
-        if not message or message == '0':
-            continue
-        
-        is_moderator = speaker == 'Moderatör'
-        pic_path = get_persona_pic(speaker)
-        
-        # Prepare avatar
-        avatar_html = ""
-        if pic_path:
-            try:
-                base64_img = get_base64_from_file(pic_path)
-                avatar_html = f'<img src="data:image/jpeg;base64,{base64_img}" class="chat-avatar" alt="{speaker}">'
-            except:
-                avatar_html = f'<div class="chat-avatar" style="background: {"#ec4899" if is_moderator else "#6366f1"}; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">{speaker[0]}</div>'
-        else:
-            avatar_html = f'<div class="chat-avatar" style="background: {"#ec4899" if is_moderator else "#6366f1"}; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold;">{speaker[0]}</div>'
-        
-        # Create message HTML
-        chat_html += f"""
-        <div class="chat-message">
-            {avatar_html}
-            <div class="chat-bubble">
-                <div class="chat-header">
-                    <span class="chat-speaker">{speaker}</span>
-                    <span class="chat-time">{timestamp}</span>
-                </div>
-                <div class="chat-content">{html.escape(message)}</div>
-            </div>
-        </div>
-        """
-    
-    chat_html += """
-    </div>
-    <script>
+        # Auto scroll için JavaScript
+        st.markdown("""
+        <script>
         setTimeout(function() {
-            var chatContainer = document.querySelector('.chat-container');
-            if (chatContainer) {
+            const containers = document.querySelectorAll('[data-testid="stVerticalBlock"]');
+            if (containers.length > 0) {
+                const chatContainer = containers[containers.length - 1];
                 chatContainer.scrollTop = chatContainer.scrollHeight;
             }
-        }, 100);
-    </script>
-    """
-    
-    st.markdown(chat_html, unsafe_allow_html=True)
+        }, 500);
+        </script>
+        """, unsafe_allow_html=True)
 
 def display_conversation_list():
     """Display conversation in a list format for easier reading"""
@@ -1032,6 +1145,7 @@ def main():
                 st.metric("Başarısız", stats['failed_requests'])
     
     # Main content tabs
+    # Main content tabs - Chat görünümü için güncelleme
     main_tabs = st.tabs(["🚀 Simülasyon", "💬 Chat Görünümü", "📋 Liste Görünümü", "📊 Analiz", "📄 Rapor"])
     
     with main_tabs[0]:
@@ -1039,23 +1153,705 @@ def main():
     
     with main_tabs[1]:
         st.markdown("### 💬 Modern Chat Görünümü")
+        
+        # Debug modu kontrolü - session_state'i ÖNCE initialize et
+        if 'debug_mode' not in st.session_state:
+            st.session_state['debug_mode'] = False
+        
+        col_debug, col_info = st.columns([1, 3])
+        with col_debug:
+            debug_mode = st.checkbox("🔍 Debug Mode", value=st.session_state['debug_mode'], key="debug_mode_checkbox")
+            # Session state'i güncelle
+            if debug_mode != st.session_state['debug_mode']:
+                st.session_state['debug_mode'] = debug_mode
+        
+        with col_info:
+            if simulator.discussion_log:
+                st.info(f"📊 {len(simulator.discussion_log)} mesaj görüntüleniyor")
+            else:
+                st.info("💭 Tartışma henüz başlamadı")
+        
+        # Chat bilgi paneli
+        if simulator.discussion_log:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("💬 Toplam Mesaj", len(simulator.discussion_log))
+            with col2:
+                persona_msgs = len([m for m in simulator.discussion_log if m['speaker'] != 'Moderatör'])
+                st.metric("👥 Persona Mesajları", persona_msgs)
+            with col3:
+                if simulator.discussion_log:
+                    last_speaker = simulator.discussion_log[-1]['speaker']
+                    st.metric("🎤 Son Konuşan", last_speaker)
+        
+        # Debug bilgileri
+        if st.session_state.get('debug_mode', False):
+            with st.expander("🔍 Debug Bilgileri"):
+                st.markdown("**Persona Resim Durumu:**")
+                for persona in simulator.personas:
+                    pic_path = get_persona_pic(persona.name)
+                    status = "✅ Var" if pic_path and os.path.exists(pic_path) else "❌ Yok"
+                    st.text(f"{persona.name}: {status} ({pic_path})")
+                
+                # Moderatör resmi kontrolü
+                mod_pic = get_persona_pic("Moderatör")
+                mod_status = "✅ Var" if mod_pic and os.path.exists(mod_pic) else "❌ Yok"
+                st.text(f"Moderatör: {mod_status} ({mod_pic})")
+        
+        # Chat görünümünü göster
         display_modern_chat()
+        
+        # Otomatik yenileme kontrolü
         if SIMULATION_STATE['running']:
-            time.sleep(2)
+            with st.spinner("💬 Yeni mesajlar bekleniyor..."):
+                time.sleep(2)
+                st.rerun()
+        
+        # Manuel yenileme butonu
+        if st.button("🔄 Chat'i Yenile", key="refresh_chat"):
             st.rerun()
-    
-    with main_tabs[2]:
+
+    with main_tabs[2]:  # Liste Görünümü
         st.markdown("### 📋 Detaylı Liste Görünümü")
-        display_conversation_list()
+        
+        if not simulator.discussion_log:
+            st.info("💭 Henüz tartışma başlamadı...")
+        else:
+            # İstatistikler
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("💬 Toplam Mesaj", len(simulator.discussion_log))
+            with col2:
+                persona_messages = len([entry for entry in simulator.discussion_log if entry['speaker'] != 'Moderatör'])
+                st.metric("👥 Persona Mesajları", persona_messages)
+            with col3:
+                moderator_messages = len([entry for entry in simulator.discussion_log if entry['speaker'] == 'Moderatör'])
+                st.metric("🎤 Moderatör Mesajları", moderator_messages)
+            with col4:
+                if len(simulator.discussion_log) > 1:
+                    start_time = simulator.discussion_log[0]['timestamp']
+                    end_time = simulator.discussion_log[-1]['timestamp']
+                    duration = end_time - start_time
+                    st.metric("⏱️ Süre", f"{duration.seconds//60}:{duration.seconds%60:02d}")
+                else:
+                    st.metric("⏱️ Süre", "0:00")
+            
+            st.markdown("---")
+            
+            # Filtreleme seçenekleri
+            col_filter1, col_filter2 = st.columns(2)
+            with col_filter1:
+                all_speakers = list(set([entry['speaker'] for entry in simulator.discussion_log]))
+                speaker_filter = st.selectbox(
+                    "🗣️ Konuşmacı Filtresi:",
+                    ["Tümü"] + all_speakers,
+                    key="speaker_filter_list"
+                )
+            
+            with col_filter2:
+                show_timestamps = st.checkbox("🕐 Zaman Damgalarını Göster", value=True, key="show_timestamps_list")
+            
+            # Mesajları filtrele
+            filtered_messages = simulator.discussion_log
+            if speaker_filter != "Tümü":
+                filtered_messages = [entry for entry in simulator.discussion_log if entry['speaker'] == speaker_filter]
+            
+            st.markdown(f"### 📝 Mesajlar ({len(filtered_messages)} adet)")
+            
+            # Sayfalama için
+            messages_per_page = 10
+            total_pages = (len(filtered_messages) + messages_per_page - 1) // messages_per_page
+            
+            if total_pages > 1:
+                current_page = st.number_input(
+                    f"Sayfa (1-{total_pages}):", 
+                    min_value=1, 
+                    max_value=total_pages, 
+                    value=1, 
+                    key="current_page_list"
+                )
+                
+                start_idx = (current_page - 1) * messages_per_page
+                end_idx = start_idx + messages_per_page
+                page_messages = filtered_messages[start_idx:end_idx]
+            else:
+                page_messages = filtered_messages
+                current_page = 1
+            
+            # Mesajları listele
+            for i, entry in enumerate(page_messages, 1):
+                speaker = entry['speaker']
+                message = clean_html_and_format_text(entry['message'])
+                timestamp = format_message_time(entry['timestamp'])
+                
+                if not message or len(message.strip()) == 0:
+                    continue
+                
+                # Profil resmi al
+                pic_path = get_persona_pic(speaker)
+                is_moderator = speaker.lower().strip() == 'moderatör'
+                
+                # Global mesaj numarası
+                global_idx = ((current_page - 1) * messages_per_page) + i
+                
+                # Mesaj container'ı
+                with st.container():
+                    # Header kısmı
+                    col_avatar, col_content = st.columns([1, 8])
+                    
+                    with col_avatar:
+                        if pic_path and os.path.exists(pic_path):
+                            try:
+                                st.image(pic_path, width=60)
+                            except Exception as e:
+                                avatar_emoji = "🎤" if is_moderator else "👤"
+                                st.markdown(f"<div style='font-size:40px;text-align:center;'>{avatar_emoji}</div>", unsafe_allow_html=True)
+                        else:
+                            avatar_emoji = "🎤" if is_moderator else "👤"
+                            st.markdown(f"<div style='font-size:40px;text-align:center;'>{avatar_emoji}</div>", unsafe_allow_html=True)
+                    
+                    with col_content:
+                        # İsim ve zaman
+                        header_text = f"**#{global_idx} - {speaker}**"
+                        if show_timestamps:
+                            header_text += f" • *{timestamp}*"
+                        st.markdown(header_text)
+                        
+                        # Mesaj içeriği
+                        if is_moderator:
+                            st.info(f"🎯 {message}")
+                        else:
+                            st.write(f"💬 {message}")
+                        
+                        # Mesaj detayları
+                        col_details1, col_details2 = st.columns(2)
+                        with col_details1:
+                            st.caption(f"📏 {len(message)} karakter")
+                        with col_details2:
+                            st.caption(f"📝 {len(message.split())} kelime")
+                    
+                    st.markdown("---")
+            
+            # Sayfalama gösterimi
+            if total_pages > 1:
+                st.info(f"📄 Sayfa {current_page} / {total_pages} • Toplam {len(filtered_messages)} mesaj")
+            
+            # Export seçenekleri
+            st.markdown("### 📤 Dışa Aktar")
+            col_export1, col_export2 = st.columns(2)
+            
+            with col_export1:
+                if st.button("📋 Kopyalanabilir Metin", key="copy_text_list"):
+                    text_content = ""
+                    for idx, entry in enumerate(filtered_messages, 1):
+                        speaker = entry['speaker']
+                        message = clean_html_and_format_text(entry['message'])
+                        timestamp = format_message_time(entry['timestamp'])
+                        text_content += f"[{idx}] [{timestamp}] {speaker}: {message}\n\n"
+                    
+                    st.text_area("📋 Kopyala:", value=text_content, height=200, key="copyable_text_list")
+            
+            with col_export2:
+                if st.button("💾 CSV İndir", key="download_csv_list"):
+                    try:
+                        import io
+                        import csv
+                        
+                        csv_buffer = io.StringIO()
+                        writer = csv.writer(csv_buffer)
+                        writer.writerow(["Sira", "Zaman", "Konusmaci", "Mesaj", "Karakter_Sayisi", "Kelime_Sayisi"])
+                        
+                        for idx, entry in enumerate(filtered_messages, 1):
+                            speaker = entry['speaker']
+                            message = clean_html_and_format_text(entry['message'])
+                            timestamp = entry['timestamp'].strftime("%Y-%m-%d %H:%M:%S")
+                            char_count = len(message)
+                            word_count = len(message.split())
+                            writer.writerow([idx, timestamp, speaker, message, char_count, word_count])
+                        
+                        csv_data = csv_buffer.getvalue()
+                        
+                        st.download_button(
+                            label="📥 CSV Dosyasını İndir",
+                            data=csv_data.encode('utf-8'),
+                            file_name=f'tartisma_listesi_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv',
+                            mime='text/csv',
+                            key="download_csv_button_list"
+                        )
+                        
+                    except Exception as e:
+                        st.error(f"CSV oluşturma hatası: {str(e)}")
+        
+        # Otomatik yenileme
         if SIMULATION_STATE['running']:
             time.sleep(3)
-            st.rerun()
+            st.rerun()        
+
+    with main_tabs[3]:  # Analiz
+        st.markdown("### 📊 Tartışma Analizi")
+        
+        if not simulator.discussion_log:
+            st.markdown('<div class="info-card">ℹ️ Analiz için önce bir simülasyon çalıştırın</div>', unsafe_allow_html=True)
+        else:
+            # Analiz türü seçimi
+            analysis_type = st.radio(
+                "📈 Analiz Türü Seçin:",
+                ["📊 Temel İstatistikler", "🔬 AI Analizi", "📈 Detaylı Rapor"],
+                horizontal=True,
+                key="analysis_type"
+            )
+            
+            if analysis_type == "📊 Temel İstatistikler":
+                st.markdown("#### 📊 Temel İstatistikler")
+                
+                # İstatistik metrikleri
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    total_messages = len(simulator.discussion_log)
+                    st.metric("💬 Toplam Mesaj", total_messages)
+                
+                with col2:
+                    total_words = sum(len(clean_html_and_format_text(entry['message']).split()) 
+                                    for entry in simulator.discussion_log)
+                    st.metric("📝 Toplam Kelime", total_words)
+                
+                with col3:
+                    avg_message_length = total_words / total_messages if total_messages > 0 else 0
+                    st.metric("📏 Ortalama Uzunluk", f"{avg_message_length:.1f} kelime")
+                
+                with col4:
+                    unique_speakers = len(set(entry['speaker'] for entry in simulator.discussion_log))
+                    st.metric("👥 Konuşmacı Sayısı", unique_speakers)
+                
+                # Konuşmacı bazlı analiz
+                st.markdown("#### 🗣️ Konuşmacı Bazlı Analiz")
+                
+                speaker_stats = {}
+                for entry in simulator.discussion_log:
+                    speaker = entry['speaker']
+                    message = clean_html_and_format_text(entry['message'])
+                    word_count = len(message.split())
+                    
+                    if speaker not in speaker_stats:
+                        speaker_stats[speaker] = {'count': 0, 'words': 0, 'chars': 0}
+                    
+                    speaker_stats[speaker]['count'] += 1
+                    speaker_stats[speaker]['words'] += word_count
+                    speaker_stats[speaker]['chars'] += len(message)
+                
+                # Tablo olarak göster
+                import pandas as pd
+                # Tablo olarak göster
+                try:
+                    df_stats = pd.DataFrame.from_dict(speaker_stats, orient='index')
+                    df_stats['avg_words'] = df_stats['words'] / df_stats['count']
+                    df_stats.columns = ['Mesaj Sayısı', 'Toplam Kelime', 'Toplam Karakter', 'Ort. Kelime/Mesaj']
+                    
+                    st.dataframe(df_stats, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Tablo oluşturma hatası: {str(e)}")
+                    st.write("**Konuşmacı İstatistikleri:**")
+                    for speaker, stats in speaker_stats.items():
+                        avg_words = stats['words'] / stats['count']
+                        st.write(f"- **{speaker}:** {stats['count']} mesaj, {stats['words']} kelime (ort. {avg_words:.1f} kelime/mesaj)")
+                
+                # Grafik gösterimi
+                try:
+                    import matplotlib.pyplot as plt
+                    import matplotlib
+                    matplotlib.use('Agg')
+                    
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+                    fig.patch.set_facecolor('#0f0f23')
+                    
+                    # Mesaj sayısı grafiği
+                    speakers = list(speaker_stats.keys())
+                    message_counts = [speaker_stats[s]['count'] for s in speakers]
+                    
+                    colors1 = ['#ff6b6b', '#4ecdc4', '#45b7d1', '#96ceb4']
+                    ax1.bar(speakers, message_counts, color=colors1[:len(speakers)])
+                    ax1.set_title('Konuşmacı Başına Mesaj Sayısı', color='white')
+                    ax1.set_ylabel('Mesaj Sayısı', color='white')
+                    ax1.tick_params(colors='white')
+                    ax1.set_facecolor('#1a1a2e')
+                    
+                    # X etiketlerini döndür
+                    plt.setp(ax1.get_xticklabels(), rotation=45, ha='right')
+                    
+                    # Kelime sayısı grafiği
+                    word_counts = [speaker_stats[s]['words'] for s in speakers]
+                    colors2 = ['#ff9f43', '#10ac84', '#ee5a24', '#0abde3']
+                    ax2.bar(speakers, word_counts, color=colors2[:len(speakers)])
+                    ax2.set_title('Konuşmacı Başına Kelime Sayısı', color='white')
+                    ax2.set_ylabel('Kelime Sayısı', color='white')
+                    ax2.tick_params(colors='white')
+                    ax2.set_facecolor('#1a1a2e')
+                    
+                    # X etiketlerini döndür
+                    plt.setp(ax2.get_xticklabels(), rotation=45, ha='right')
+                    
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                    
+                except ImportError:
+                    st.warning("📊 Grafik gösterimi için matplotlib kütüphanesi gerekli")
+                except Exception as e:
+                    st.error(f"Grafik oluşturma hatası: {str(e)}")
+                
+            elif analysis_type == "🔬 AI Analizi":
+                st.markdown("#### 🔬 AI Destekli Analiz")
+                
+                col_basic, col_expert = st.columns(2)
+                
+                with col_basic:
+                    if st.button("📊 Temel AI Analizi", key="basic_ai_analysis"):
+                        with st.spinner("🔄 AI analiz ediyor..."):
+                            try:
+                                # Temel analiz
+                                full_discussion = ""
+                                for entry in simulator.discussion_log:
+                                    timestamp = entry['timestamp'].strftime("%H:%M:%S")
+                                    speaker = entry['speaker']
+                                    message = clean_html_and_format_text(entry['message'])
+                                    full_discussion += f"[{timestamp}] {speaker}: {message}\n"
+                                
+                                analysis_prompt = f"""Sen bir sosyal araştırmacısın. Bu odak grup tartışmasını analiz et:
+
+TARTIŞMA:
+{full_discussion[:3000]}...
+
+Şu başlıklarda kısa bir analiz yap:
+1. GENEL ATMOSFER: Tartışmanın tonu nasıl?
+2. ANA KONULAR: Hangi konular öne çıktı?
+3. KATILIMCI DAVRANIŞI: Kimler nasıl davrandı?
+4. UZLAŞMA/ÇATIŞMA: Anlaştıkları ve çatıştıkları noktalar?
+5. ÖNEMLİ BULGULAR: En dikkat çekici 3 nokta?
+
+Maksimum 500 kelime ile analiz et."""
+
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                analysis = loop.run_until_complete(simulator.llm_client.call_llm(analysis_prompt))
+                                
+                                st.session_state['basic_analysis_result'] = analysis
+                                st.success("✅ Temel analiz tamamlandı!")
+                                
+                            except Exception as e:
+                                st.error(f"❌ Analiz hatası: {str(e)}")
+                            finally:
+                                try:
+                                    loop.close()
+                                except:
+                                    pass
+                
+                with col_expert:
+                    if st.button("🎓 Uzman Analizi", key="expert_ai_analysis"):
+                        with st.spinner("🔬 Uzman araştırmacı analiz ediyor..."):
+                            try:
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                
+                                comprehensive_analysis = loop.run_until_complete(simulator.generate_analysis())
+                                st.session_state['expert_analysis_result'] = comprehensive_analysis
+                                st.success("✅ Uzman analizi tamamlandı!")
+                                
+                            except Exception as e:
+                                st.error(f"❌ Uzman analiz hatası: {str(e)}")
+                            finally:
+                                try:
+                                    loop.close()
+                                except:
+                                    pass
+                
+                # Analiz sonuçlarını göster
+                if st.session_state.get('basic_analysis_result'):
+                    st.markdown("#### 📋 Temel Analiz Sonucu")
+                    st.markdown(st.session_state['basic_analysis_result'])
+                
+                if st.session_state.get('expert_analysis_result'):
+                    st.markdown("#### 🎓 Uzman Analiz Sonucu")
+                    with st.expander("Detaylı Uzman Raporu", expanded=False):
+                        st.markdown(st.session_state['expert_analysis_result'])
+            
+            elif analysis_type == "📈 Detaylı Rapor":
+                st.markdown("#### 📈 Detaylı Analiz Raporu")
+                
+                # Zaman bazlı analiz
+                st.markdown("##### ⏱️ Zaman Bazlı Analiz")
+                
+                if len(simulator.discussion_log) > 1:
+                    time_analysis = []
+                    for i, entry in enumerate(simulator.discussion_log):
+                        time_analysis.append({
+                            'Mesaj No': i+1,
+                            'Zaman': entry['timestamp'].strftime("%H:%M:%S"),
+                            'Konuşmacı': entry['speaker'],
+                            'Kelime Sayısı': len(clean_html_and_format_text(entry['message']).split()),
+                            'Karakter Sayısı': len(clean_html_and_format_text(entry['message']))
+                        })
+                    
+                    df_time = pd.DataFrame(time_analysis)
+                    st.dataframe(df_time, use_container_width=True)
+                
+                # Konu analizi
+                st.markdown("##### 🎯 Gündem Maddeleri Analizi")
+                
+                if simulator.agenda_items:
+                    for i, item in enumerate(simulator.agenda_items, 1):
+                        with st.expander(f"📋 Gündem {i}: {item.title}"):
+                            st.write(f"**İçerik:** {item.content[:200]}...")
+                            
+                            if hasattr(item, 'persona_scores') and item.persona_scores:
+                                st.write("**Persona İlgi Puanları:**")
+                                for persona_name, score in item.persona_scores.items():
+                                    st.write(f"• {persona_name}: {score}/10")
+                            
+                            if hasattr(item, 'persona_memories') and item.persona_memories:
+                                st.write("**Persona Belleklerindeki Özetler:**")
+                                for persona_name, memory in item.persona_memories.items():
+                                    st.write(f"• **{persona_name}:** {memory[:150]}...")
+                
+                # Etkileşim analizi
+                st.markdown("##### 🔄 Etkileşim Analizi")
+                
+                interaction_data = {}
+                previous_speaker = None
+                
+                for entry in simulator.discussion_log:
+                    current_speaker = entry['speaker']
+                    if previous_speaker and previous_speaker != current_speaker:
+                        pair = f"{previous_speaker} → {current_speaker}"
+                        interaction_data[pair] = interaction_data.get(pair, 0) + 1
+                    previous_speaker = current_speaker
+                
+                if interaction_data:
+                    st.write("**En Sık Etkileşimler:**")
+                    sorted_interactions = sorted(interaction_data.items(), key=lambda x: x[1], reverse=True)
+                    for pair, count in sorted_interactions[:10]:
+                        st.write(f"• {pair}: {count} kez")
+        
+        # Session state'e analiz sonuçlarını initialize et
+        if 'basic_analysis_result' not in st.session_state:
+            st.session_state['basic_analysis_result'] = ""
+        if 'expert_analysis_result' not in st.session_state:
+            st.session_state['expert_analysis_result'] = ""
     
-    with main_tabs[3]:
-        display_analysis_tab()
-    
-    with main_tabs[4]:
-        display_report_tab()
+    with main_tabs[4]:  # Rapor
+        st.markdown("### 📄 Rapor ve Dışa Aktarma")
+        
+        if not simulator.discussion_log:
+            st.markdown('<div class="info-card">ℹ️ Rapor oluşturmak için önce bir simülasyon çalıştırın</div>', unsafe_allow_html=True)
+        else:
+            # Rapor türü seçimi
+            report_type = st.radio(
+                "📋 Rapor Türü:",
+                ["📊 Özet Rapor", "📄 Tam Rapor", "🔢 İstatistik Raporu"],
+                horizontal=True,
+                key="report_type"
+            )
+            
+            # Rapor seçenekleri
+            col_options1, col_options2 = st.columns(2)
+            
+            with col_options1:
+                include_timestamps = st.checkbox("🕐 Zaman Damgaları Dahil Et", value=True, key="include_timestamps")
+                include_analysis = st.checkbox("📊 Analiz Sonuçları Dahil Et", value=True, key="include_analysis")
+            
+            with col_options2:
+                include_statistics = st.checkbox("📈 İstatistikler Dahil Et", value=True, key="include_statistics")
+                include_agenda_scores = st.checkbox("🎯 Gündem Puanları Dahil Et", value=True, key="include_agenda_scores")
+            
+            st.markdown("---")
+            
+            # Rapor önizlemesi
+            st.markdown("#### 👁️ Rapor Önizlemesi")
+            
+            # Rapor içeriğini oluştur
+            report_content = f"""# 🎯 Odak Grup Simülasyonu Raporu
+
+## 📅 Genel Bilgiler
+- **Tarih:** {datetime.now().strftime("%d.%m.%Y %H:%M")}
+- **Toplam Mesaj:** {len(simulator.discussion_log)}
+- **Katılımcılar:** {len(simulator.personas)} kişi
+- **Süre:** """
+            
+            if simulator.discussion_log:
+                start_time = simulator.discussion_log[0]['timestamp']
+                end_time = simulator.discussion_log[-1]['timestamp']
+                duration = end_time - start_time
+                report_content += f"{duration.seconds//60}:{duration.seconds%60:02d}\n\n"
+            
+            # Katılımcı bilgileri
+            report_content += "## 👥 Katılımcılar\n"
+            for persona in simulator.personas:
+                report_content += f"- **{persona.name}:** {persona.role} - {persona.personality}\n"
+            report_content += "\n"
+            
+            # Gündem maddeleri
+            if simulator.agenda_items:
+                report_content += "## 📋 Gündem Maddeleri\n"
+                for i, item in enumerate(simulator.agenda_items, 1):
+                    report_content += f"{i}. **{item.title}**\n"
+                    report_content += f"   {item.content[:200]}...\n\n"
+                    
+                    if include_agenda_scores and hasattr(item, 'persona_scores') and item.persona_scores:
+                        report_content += "   **İlgi Puanları:**\n"
+                        for persona_name, score in item.persona_scores.items():
+                            report_content += f"   - {persona_name}: {score}/10\n"
+                        report_content += "\n"
+            
+            # İstatistikler
+            if include_statistics:
+                report_content += "## 📊 İstatistikler\n"
+                
+                speaker_stats = {}
+                total_words = 0
+                
+                for entry in simulator.discussion_log:
+                    speaker = entry['speaker']
+                    message = clean_html_and_format_text(entry['message'])
+                    word_count = len(message.split())
+                    total_words += word_count
+                    
+                    if speaker not in speaker_stats:
+                        speaker_stats[speaker] = {'count': 0, 'words': 0}
+                    
+                    speaker_stats[speaker]['count'] += 1
+                    speaker_stats[speaker]['words'] += word_count
+                
+                report_content += f"- **Toplam Kelime:** {total_words}\n"
+                report_content += f"- **Ortalama Mesaj Uzunluğu:** {total_words/len(simulator.discussion_log):.1f} kelime\n\n"
+                
+                report_content += "### 🗣️ Konuşmacı Bazlı İstatistikler\n"
+                for speaker, stats in speaker_stats.items():
+                    avg_words = stats['words'] / stats['count']
+                    report_content += f"- **{speaker}:** {stats['count']} mesaj, {stats['words']} kelime (ort. {avg_words:.1f} kelime/mesaj)\n"
+                report_content += "\n"
+            
+            # Tartışma içeriği
+            if report_type == "📄 Tam Rapor":
+                report_content += "## 💬 Tam Tartışma Geçmişi\n\n"
+                for i, entry in enumerate(simulator.discussion_log, 1):
+                    speaker = entry['speaker']
+                    message = clean_html_and_format_text(entry['message'])
+                    timestamp = format_message_time(entry['timestamp'])
+                    
+                    if include_timestamps:
+                        report_content += f"**[{i}] {speaker} - {timestamp}**\n"
+                    else:
+                        report_content += f"**[{i}] {speaker}**\n"
+                    
+                    report_content += f"{message}\n\n"
+            
+            elif report_type == "📊 Özet Rapor":
+                report_content += "## 📝 Özet\n"
+                report_content += "Bu rapor, odak grup simülasyonunun temel bulgularını içermektedir.\n\n"
+                
+                # Son 5 mesajı göster
+                report_content += "### 🔚 Son Mesajlar\n"
+                for entry in simulator.discussion_log[-5:]:
+                    speaker = entry['speaker']
+                    message = clean_html_and_format_text(entry['message'])[:100] + "..."
+                    report_content += f"- **{speaker}:** {message}\n"
+                report_content += "\n"
+            
+            # Analiz sonuçları
+            if include_analysis:
+                basic_analysis = st.session_state.get('basic_analysis_result', '')
+                expert_analysis = st.session_state.get('expert_analysis_result', '')
+                
+                if basic_analysis:
+                    report_content += "## 📊 Temel Analiz\n"
+                    report_content += basic_analysis + "\n\n"
+                
+                if expert_analysis:
+                    report_content += "## 🎓 Uzman Analizi\n"
+                    report_content += expert_analysis + "\n\n"
+            
+            # Önizleme göster
+            with st.expander("👁️ Rapor İçeriği Önizlemesi", expanded=False):
+                st.markdown(report_content[:2000] + "\n\n*... (devamı download'da)*")
+            
+            st.markdown("---")
+            
+            # İndirme seçenekleri
+            st.markdown("### 📥 İndirme Seçenekleri")
+            
+            col_download1, col_download2, col_download3 = st.columns(3)
+            
+            with col_download1:
+                # Markdown dosyası
+                if st.button("📝 Markdown İndir", key="download_md"):
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f'odak_grup_raporu_{timestamp}.md'
+                    
+                    st.download_button(
+                        label="📥 MD Dosyasını İndir",
+                        data=report_content.encode('utf-8'),
+                        file_name=filename,
+                        mime='text/markdown',
+                        key="download_md_button"
+                    )
+            
+            with col_download2:
+                # TXT dosyası
+                if st.button("📄 TXT İndir", key="download_txt"):
+                    # Markdown işaretlerini temizle
+                    import re
+                    clean_content = re.sub(r'[#*_`]', '', report_content)
+                    
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f'odak_grup_raporu_{timestamp}.txt'
+                    
+                    st.download_button(
+                        label="📥 TXT Dosyasını İndir",
+                        data=clean_content.encode('utf-8'),
+                        file_name=filename,
+                        mime='text/plain',
+                        key="download_txt_button"
+                    )
+            
+            with col_download3:
+                # JSON export
+                if st.button("🔢 JSON İndir", key="download_json"):
+                    export_data = {
+                        "simulation_info": {
+                            "date": datetime.now().isoformat(),
+                            "total_messages": len(simulator.discussion_log),
+                            "participants": [
+                                {
+                                    "name": p.name, 
+                                    "role": p.role, 
+                                    "personality": p.personality
+                                } for p in simulator.personas
+                            ]
+                        },
+                        "agenda_items": [
+                            {
+                                "title": item.title,
+                                "content": item.content,
+                                "scores": getattr(item, 'persona_scores', {}),
+                                "memories": getattr(item, 'persona_memories', {})
+                            } for item in simulator.agenda_items
+                        ],
+                        "conversation": [
+                            {
+                                "timestamp": entry['timestamp'].isoformat(),
+                                "speaker": entry['speaker'],
+                                "message": clean_html_and_format_text(entry['message'])
+                            } for entry in simulator.discussion_log
+                        ],
+                        "analysis": {
+                            "basic": st.session_state.get('basic_analysis_result', ''),
+                            "expert": st.session_state.get('expert_analysis_result', '')
+                        },
+                        "statistics": speaker_stats if 'speaker_stats' in locals() else {}
+                    }
+                    
+                    json_str = json.dumps(export_data, ensure_ascii=False, indent=2)
+                    
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")    
 
 if __name__ == "__main__":
     main()
